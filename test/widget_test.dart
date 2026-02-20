@@ -10,10 +10,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:grocerysaver/main.dart';
 
 void main() {
-  testWidgets('Muestra pantalla de login', (WidgetTester tester) async {
+  testWidgets('Muestra pantalla de onboarding', (WidgetTester tester) async {
     await tester.pumpWidget(const GrocerySaverApp());
 
-    expect(find.text('Iniciar sesion'), findsOneWidget);
-    expect(find.text('Entrar'), findsOneWidget);
+    expect(find.text('Bienvenido a GrocerySaver'), findsOneWidget);
+    expect(find.text('Siguiente'), findsOneWidget);
   });
 }

@@ -6,6 +6,7 @@ import 'services/auth_api.dart';
 import 'viewmodels/auth_viewmodel.dart';
 import 'views/home_view.dart';
 import 'views/login_view.dart';
+import 'views/onboarding_view.dart';
 import 'views/register_view.dart';
 
 void main() {
@@ -103,9 +104,11 @@ class _GrocerySaverAppState extends State<GrocerySaverApp> {
           ),
         ),
       ),
-      initialRoute: '/login',
+      initialRoute: '/onboarding',
       onGenerateRoute: (settings) {
         switch (settings.name) {
+          case '/onboarding':
+            return MaterialPageRoute(builder: (_) => const OnboardingView());
           case '/register':
             return MaterialPageRoute(
               builder: (_) => RegisterView(viewModel: _authViewModel),

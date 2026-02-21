@@ -5,6 +5,9 @@ import '../services/api_config.dart';
 import '../services/catalog_api.dart';
 import '../viewmodels/auth_viewmodel.dart';
 import '../viewmodels/catalog_viewmodel.dart';
+import 'categories_view.dart';
+import 'product_best_options_view.dart';
+import 'profile_view.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key, required this.viewModel});
@@ -51,14 +54,23 @@ class _HomeViewState extends State<HomeView> {
             session.username ??
             (session.email.isEmpty ? 'usuario' : session.email);
 
-        final categories = _catalogViewModel.categories.take(8).toList();
-        final products = _catalogViewModel.products.take(6).toList();
+        final categories = _catalogViewModel.categories;
+        final products = _catalogViewModel.products;
+        final featuredProduct = products.isEmpty ? null : products.first;
 
         return Scaffold(
           backgroundColor: const Color(0xFFF3F5F7),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _selectedTab,
             onDestinationSelected: (index) {
+              if (index == 1) {
+                _openCategories(context);
+                return;
+              }
+              if (index == 4) {
+                _openProfile(context);
+                return;
+              }
               setState(() {
                 _selectedTab = index;
               });
@@ -182,9 +194,12 @@ class _HomeViewState extends State<HomeView> {
                               final label = _catalogViewModel.categoryName(
                                 category,
                               );
+                              final imageUrl = _catalogViewModel
+                                  .categoryImageUrl(category);
 
                               return _CategoryTile(
                                 label: label,
+                                imageUrl: imageUrl,
                                 icon: _iconForCategory(index),
                                 isSelected:
                                     categoryId != null &&
@@ -216,22 +231,53 @@ class _HomeViewState extends State<HomeView> {
                             style: TextStyle(color: Color(0xFF7A8A97)),
                           )
                         else
-                          ...products.map(
-                            (product) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _ProductCard(
+                          GridView.builder(
+                            itemCount: products.length,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 10,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: 1.35,
+                                ),
+                            itemBuilder: (context, index) {
+                              final product = products[index];
+                              return _FeaturedProductCard(
                                 name: _catalogViewModel.productName(product),
+                                brand: _catalogViewModel.productDescription(
+                                  product,
+                                ),
+                                imageUrl: _catalogViewModel.productImageUrl(
+                                  product,
+                                ),
                                 price: _catalogViewModel.productPrice(product),
-                                store: _catalogViewModel.productStore(product),
-                              ),
-                            ),
+                                discountBadge: _catalogViewModel
+                                    .productDiscountBadge(product),
+                                onTap: () =>
+                                    _openProductDetail(context, product),
+                              );
+                            },
                           ),
                         const SizedBox(height: 12),
                         _TrackCard(
-                          storesCount: _catalogViewModel.stores.length,
-                          bestStore:
-                              _catalogViewModel.bestStoreName() ?? 'Sin datos',
-                          bestPrice: _catalogViewModel.bestPrice() ?? '-',
+                          storesCount: featuredProduct == null
+                              ? 0
+                              : _catalogViewModel.productStoresAvailable(
+                                  featuredProduct,
+                                ),
+                          bestStore: featuredProduct == null
+                              ? 'Sin datos'
+                              : _catalogViewModel.productBestOptionStore(
+                                  featuredProduct,
+                                ),
+                          bestPrice: featuredProduct == null
+                              ? '-'
+                              : _catalogViewModel.productBestOptionPrice(
+                                  featuredProduct,
+                                ),
+                          onView: () => _openBestOptions(context),
                         ),
                       ],
                     ),
@@ -269,6 +315,40 @@ class _HomeViewState extends State<HomeView> {
       return;
     }
     Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+  }
+
+  void _openBestOptions(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ProductBestOptionsView(catalogViewModel: _catalogViewModel),
+      ),
+    );
+  }
+
+  void _openProductDetail(BuildContext context, Map<String, dynamic> product) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProductBestOptionDetailView(
+          product: product,
+          catalogViewModel: _catalogViewModel,
+        ),
+      ),
+    );
+  }
+
+  void _openCategories(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CategoriesView(catalogViewModel: _catalogViewModel),
+      ),
+    );
+  }
+
+  void _openProfile(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ProfileView()));
   }
 
   Future<bool> _confirmLogout(BuildContext context) async {
@@ -600,12 +680,14 @@ class _SectionTitle extends StatelessWidget {
 class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.label,
+    required this.imageUrl,
     required this.icon,
     required this.isSelected,
     required this.onTap,
   });
 
   final String label;
+  final String? imageUrl;
   final IconData icon;
   final bool isSelected;
   final VoidCallback onTap;
@@ -627,10 +709,10 @@ class _CategoryTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
             ),
             alignment: Alignment.center,
-            child: Icon(
-              icon,
-              color: isSelected ? Colors.white : const Color(0xFF2F7D57),
-              size: 30,
+            child: _CategoryVisual(
+              imageUrl: imageUrl,
+              icon: icon,
+              isSelected: isSelected,
             ),
           ),
           const SizedBox(height: 6),
@@ -650,74 +732,178 @@ class _CategoryTile extends StatelessWidget {
   }
 }
 
-class _ProductCard extends StatelessWidget {
-  const _ProductCard({
-    required this.name,
-    required this.price,
-    required this.store,
+class _CategoryVisual extends StatelessWidget {
+  const _CategoryVisual({
+    required this.imageUrl,
+    required this.icon,
+    required this.isSelected,
   });
 
-  final String name;
-  final String price;
-  final String store;
+  final String? imageUrl;
+  final IconData icon;
+  final bool isSelected;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFDDE3E8)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEAF3ED),
-              borderRadius: BorderRadius.circular(12),
+    final url = imageUrl?.trim() ?? '';
+    if (url.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          url,
+          width: 44,
+          height: 44,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _fallbackIcon(),
+        ),
+      );
+    }
+    return _fallbackIcon();
+  }
+
+  Widget _fallbackIcon() {
+    return Icon(
+      icon,
+      color: isSelected ? Colors.white : const Color(0xFF2F7D57),
+      size: 30,
+    );
+  }
+}
+
+class _FeaturedProductCard extends StatelessWidget {
+  const _FeaturedProductCard({
+    required this.name,
+    required this.brand,
+    required this.imageUrl,
+    required this.price,
+    required this.discountBadge,
+    required this.onTap,
+  });
+
+  final String name;
+  final String brand;
+  final String? imageUrl;
+  final String price;
+  final String? discountBadge;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFDDE3E8)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (discountBadge != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5F6D9),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(
+                      discountBadge!,
+                      style: const TextStyle(
+                        color: Color(0xFF2C8B45),
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 20, height: 14),
+                const Icon(Icons.favorite, size: 12, color: Color(0xFF27A05A)),
+              ],
             ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.shopping_basket_outlined,
-              color: Color(0xFF2F7D57),
+            const SizedBox(height: 3),
+            Center(child: _FeaturedProductVisual(imageUrl: imageUrl)),
+            const SizedBox(height: 5),
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10.3,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Text(
+              brand,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF8A959F), fontSize: 9.5),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  store,
+                  price,
                   style: const TextStyle(
-                    color: Color(0xFF647380),
-                    fontSize: 12,
+                    color: Color(0xFF1F6A47),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
                   ),
                 ),
               ],
             ),
-          ),
-          Text(
-            price,
-            style: const TextStyle(
-              color: Color(0xFF1F6A47),
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-            ),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FeaturedProductVisual extends StatelessWidget {
+  const _FeaturedProductVisual({required this.imageUrl});
+
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = imageUrl?.trim() ?? '';
+    if (url.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          url,
+          width: 44,
+          height: 44,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _fallback(),
+        ),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() {
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F3F5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.shopping_basket_outlined,
+        size: 20,
+        color: Color(0xFF7B8791),
       ),
     );
   }
@@ -728,11 +914,13 @@ class _TrackCard extends StatelessWidget {
     required this.storesCount,
     required this.bestStore,
     required this.bestPrice,
+    required this.onView,
   });
 
   final int storesCount;
   final String bestStore;
   final String bestPrice;
+  final VoidCallback onView;
 
   @override
   Widget build(BuildContext context) {
@@ -781,12 +969,10 @@ class _TrackCard extends StatelessWidget {
             ),
           ),
           FilledButton(
-            onPressed: null,
+            onPressed: onView,
             style: FilledButton.styleFrom(
               backgroundColor: Colors.white,
-              disabledBackgroundColor: Colors.white,
               foregroundColor: const Color(0xFF24513A),
-              disabledForegroundColor: const Color(0xFF24513A),
               minimumSize: const Size(82, 36),
             ),
             child: const Text(

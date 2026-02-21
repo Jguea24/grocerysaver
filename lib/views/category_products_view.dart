@@ -116,8 +116,26 @@ class _CategoryProductsViewState extends State<CategoryProductsView> {
           price: _price(product),
           stores: _storesAvailable(product),
           bestOption: _bestOption(product),
+          onTap: () => _openProductDetail(product),
         );
       },
+    );
+  }
+
+  void _openProductDetail(Map<String, dynamic> product) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _CategoryProductDetailView(
+          name: _name(product),
+          description: _description(product),
+          imageUrl: _imageUrl(product),
+          price: _price(product),
+          stores: _storesAvailable(product),
+          bestOption: _bestOption(product),
+          categoryName: _categoryName(product),
+          prices: _priceRows(product),
+        ),
+      ),
     );
   }
 
@@ -156,11 +174,60 @@ class _CategoryProductsViewState extends State<CategoryProductsView> {
   String _bestOption(Map<String, dynamic> product) {
     final best = product['best_option'];
     if (best is Map<String, dynamic>) {
-      final store = best['store'] ?? best['store_name'] ?? best['name'] ?? '-';
+      final storeRaw = best['store'];
+      String store = '-';
+      if (storeRaw is Map<String, dynamic>) {
+        store =
+            (storeRaw['name'] ??
+                    storeRaw['store_name'] ??
+                    storeRaw['title'] ??
+                    '-')
+                .toString();
+      } else {
+        store = (best['store'] ?? best['store_name'] ?? best['name'] ?? '-')
+            .toString();
+      }
       final price = best['price'] ?? best['best_price'] ?? '-';
       return '$store ($price)';
     }
     return '-';
+  }
+
+  String _categoryName(Map<String, dynamic> product) {
+    final category = product['category'];
+    if (category is Map<String, dynamic>) {
+      final raw = category['name'] ?? category['title'];
+      final text = (raw ?? '').toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    final raw = product['category_name'] ?? category;
+    final text = (raw ?? '').toString().trim();
+    return text.isEmpty ? widget.categoryName : text;
+  }
+
+  List<_StorePrice> _priceRows(Map<String, dynamic> product) {
+    final prices = product['prices'];
+    if (prices is! List) return const [];
+    final rows = <_StorePrice>[];
+    for (final item in prices) {
+      if (item is! Map<String, dynamic>) continue;
+      final storeRaw = item['store'];
+      String store = 'Tienda';
+      if (storeRaw is Map<String, dynamic>) {
+        final name =
+            storeRaw['name'] ?? storeRaw['store_name'] ?? storeRaw['title'];
+        final text = (name ?? '').toString().trim();
+        if (text.isNotEmpty) store = text;
+      } else {
+        final name = item['store_name'] ?? item['store'] ?? item['market'];
+        final text = (name ?? '').toString().trim();
+        if (text.isNotEmpty) store = text;
+      }
+      final rawPrice = item['price'] ?? item['amount'] ?? item['value'];
+      final priceText = rawPrice == null ? 'N/A' : '\$$rawPrice';
+      rows.add(_StorePrice(store: store, price: priceText));
+    }
+    return rows;
   }
 
   String _errorToText(Object error) {
@@ -177,6 +244,7 @@ class _ProductTile extends StatelessWidget {
     required this.price,
     required this.stores,
     required this.bestOption,
+    required this.onTap,
   });
 
   final String name;
@@ -185,69 +253,214 @@ class _ProductTile extends StatelessWidget {
   final String price;
   final String stores;
   final String bestOption;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFDDE3E8)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _ProductImage(imageUrl: imageUrl),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF111316),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFDDE3E8)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _ProductImage(imageUrl: imageUrl),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111316),
+                    ),
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              description,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF8A959F), fontSize: 12),
+            ),
+            const Spacer(),
+            Text(
+              price,
+              style: const TextStyle(
+                color: Color(0xFF1F6A47),
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Tiendas: $stores',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF5E6B76), fontSize: 12),
+            ),
+            Text(
+              'Mejor: $bestOption',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF5E6B76), fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryProductDetailView extends StatelessWidget {
+  const _CategoryProductDetailView({
+    required this.name,
+    required this.description,
+    required this.imageUrl,
+    required this.price,
+    required this.stores,
+    required this.bestOption,
+    required this.categoryName,
+    required this.prices,
+  });
+
+  final String name;
+  final String description;
+  final String? imageUrl;
+  final String price;
+  final String stores;
+  final String bestOption;
+  final String categoryName;
+  final List<_StorePrice> prices;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(name)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if ((imageUrl ?? '').isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                imageUrl!,
+                height: 180,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          if ((imageUrl ?? '').isNotEmpty) const SizedBox(height: 12),
           Text(
             description,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFF8A959F), fontSize: 12),
+            style: const TextStyle(color: Color(0xFF4A5965), fontSize: 14),
           ),
-          const Spacer(),
-          Text(
-            price,
-            style: const TextStyle(
-              color: Color(0xFF1F6A47),
-              fontWeight: FontWeight.w900,
-              fontSize: 18,
+          const SizedBox(height: 12),
+          _InfoLine(label: 'Categoria', value: categoryName),
+          _InfoLine(label: 'Precio', value: price),
+          _InfoLine(label: 'Tiendas', value: stores),
+          _InfoLine(label: 'Mejor opcion', value: bestOption),
+          const SizedBox(height: 14),
+          const Text(
+            'Precios por tienda',
+            style: TextStyle(
+              color: Color(0xFF1A242D),
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
             ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 8),
+          if (prices.isEmpty)
+            const Text(
+              'Sin precios disponibles',
+              style: TextStyle(color: Color(0xFF7A8A97)),
+            )
+          else
+            ...prices.map(
+              (row) => Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFDDE3E8)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        row.store,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    Text(
+                      row.price,
+                      style: const TextStyle(
+                        color: Color(0xFF1F6A47),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
           Text(
-            'Tiendas: $stores',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFF5E6B76), fontSize: 12),
+            '$label: ',
+            style: const TextStyle(
+              color: Color(0xFF42505B),
+              fontWeight: FontWeight.w700,
+            ),
           ),
           Text(
-            'Mejor: $bestOption',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFF5E6B76), fontSize: 12),
+            value,
+            style: const TextStyle(
+              color: Color(0xFF42505B),
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+class _StorePrice {
+  const _StorePrice({required this.store, required this.price});
+
+  final String store;
+  final String price;
 }
 
 class _ProductImage extends StatelessWidget {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -6,8 +8,11 @@ import '../services/catalog_api.dart';
 import '../viewmodels/auth_viewmodel.dart';
 import '../viewmodels/catalog_viewmodel.dart';
 import 'categories_view.dart';
+import 'offers_view.dart';
 import 'product_best_options_view.dart';
 import 'profile_view.dart';
+import 'scan_view.dart';
+import 'weather_view.dart';
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key, required this.viewModel});
@@ -67,7 +72,19 @@ class _HomeViewState extends State<HomeView> {
                 _openCategories(context);
                 return;
               }
+              if (index == 2) {
+                _openBestOptions(context);
+                return;
+              }
+              if (index == 3) {
+                _openOffers(context);
+                return;
+              }
               if (index == 4) {
+                _openWeather(context, location);
+                return;
+              }
+              if (index == 5) {
                 _openProfile(context);
                 return;
               }
@@ -97,6 +114,11 @@ class _HomeViewState extends State<HomeView> {
                 label: 'Ofertas',
               ),
               NavigationDestination(
+                icon: Icon(Icons.cloud_outlined),
+                selectedIcon: Icon(Icons.cloud_rounded),
+                label: 'Clima',
+              ),
+              NavigationDestination(
                 icon: Icon(Icons.person_outline_rounded),
                 selectedIcon: Icon(Icons.person_rounded),
                 label: 'Perfil',
@@ -119,6 +141,7 @@ class _HomeViewState extends State<HomeView> {
                           username: username,
                           location: location,
                           role: session.role,
+                          onScan: () => _openScan(context),
                           onLogout: () => _logout(context),
                         ),
                         const SizedBox(height: 14),
@@ -345,6 +368,22 @@ class _HomeViewState extends State<HomeView> {
     );
   }
 
+  void _openWeather(BuildContext context, String locationHint) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => WeatherView(initialCity: locationHint)),
+    );
+  }
+
+  void _openOffers(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const OffersView()));
+  }
+
+  void _openScan(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScanView()));
+  }
+
   void _openProfile(BuildContext context) {
     Navigator.of(
       context,
@@ -384,12 +423,14 @@ class _Header extends StatelessWidget {
     required this.username,
     required this.location,
     required this.role,
+    required this.onScan,
     required this.onLogout,
   });
 
   final String username;
   final String location;
   final String? role;
+  final VoidCallback onScan;
   final VoidCallback onLogout;
 
   @override
@@ -443,8 +484,9 @@ class _Header extends StatelessWidget {
           ),
         ),
         IconButton(
-          onPressed: () {},
-          icon: const Icon(Icons.notifications_none_rounded),
+          tooltip: 'Escanear producto',
+          onPressed: onScan,
+          icon: const Icon(Icons.qr_code_scanner_rounded),
         ),
         IconButton(
           tooltip: 'Cerrar sesion',
@@ -468,9 +510,23 @@ class _SearchBar extends StatefulWidget {
 
 class _SearchBarState extends State<_SearchBar> {
   final TextEditingController _controller = TextEditingController();
+  Timer? _debounce;
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      widget.onSearch(value);
+    });
+  }
+
+  void _submitNow(String value) {
+    _debounce?.cancel();
+    widget.onSearch(value);
+  }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -496,11 +552,13 @@ class _SearchBarState extends State<_SearchBar> {
                 hintText: 'Buscar productos o tiendas',
               ),
               textInputAction: TextInputAction.search,
-              onSubmitted: widget.onSearch,
+              onChanged: _onChanged,
+              onSubmitted: _submitNow,
             ),
           ),
           IconButton(
             onPressed: () {
+              _debounce?.cancel();
               _controller.clear();
               widget.onClear();
             },

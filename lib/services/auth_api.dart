@@ -260,8 +260,8 @@ class AuthApi {
 
   /// Persiste access y refresh tokens si el payload los incluye.
   Future<void> _saveTokensFrom(Map<String, dynamic> data) async {
-    final tokens = data['tokens'];
-    if (tokens is! Map<String, dynamic>) {
+    final tokens = _tokensFrom(data);
+    if (tokens == null) {
       return;
     }
     final access = tokens['access']?.toString();
@@ -274,13 +274,65 @@ class AuthApi {
     }
   }
 
+  /// Acepta respuestas con tokens anidados o en la raiz.
+  Map<String, dynamic>? _tokensFrom(Map<String, dynamic> data) {
+    final nested = data['tokens'];
+    if (nested is Map<String, dynamic>) {
+      return nested;
+    }
+
+    final access = data['access'];
+    final refresh = data['refresh'];
+    if (access != null || refresh != null) {
+      return {
+        'access': access,
+        'refresh': refresh,
+      };
+    }
+    return null;
+  }
+
   /// Intenta extraer el mensaje mas util desde el cuerpo de error.
   String _extractMessage(Map<String, dynamic> data) {
-    if (data['detail'] != null) return data['detail'].toString();
-    if (data['message'] != null) return data['message'].toString();
-    if (data['error'] != null) return data['error'].toString();
-    if (data.isNotEmpty) return data.toString();
+    final detail = data['detail'];
+    if (detail != null) return _toHumanMessage(detail.toString());
+
+    final message = data['message'];
+    if (message != null) return _toHumanMessage(message.toString());
+
+    final error = data['error'];
+    if (error != null) return _toHumanMessage(error.toString());
+
+    final nonFieldErrors = data['non_field_errors'];
+    if (nonFieldErrors is List && nonFieldErrors.isNotEmpty) {
+      final joined = nonFieldErrors
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .join('\n');
+      if (joined.isNotEmpty) {
+        return _toHumanMessage(joined);
+      }
+    }
+
+    if (data.isNotEmpty) return _toHumanMessage(data.toString());
     return '';
+  }
+
+  /// Traduce mensajes tecnicos comunes del backend a textos para usuario final.
+  String _toHumanMessage(String raw) {
+    final text = raw.trim();
+    final normalized = text.toLowerCase();
+
+    if (normalized.contains('credenciales invalidas') ||
+        normalized.contains('invalid credentials')) {
+      return 'Tu correo o contrasena son incorrectos.';
+    }
+
+    if (normalized.contains('non_field_errors')) {
+      return 'No pudimos iniciar sesion con esos datos.';
+    }
+
+    return text;
   }
 
   /// Limita el tamano del body para reportarlo sin inundar los errores.

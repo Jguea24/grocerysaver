@@ -19,8 +19,8 @@ class AuthSession {
     Map<String, dynamic> data, {
     String fallbackEmail = '',
   }) {
-    final tokens = data['tokens'];
-    if (tokens is! Map<String, dynamic>) {
+    final tokens = _tokensFrom(data);
+    if (tokens == null) {
       throw const FormatException('La respuesta no contiene "tokens".');
     }
 
@@ -56,5 +56,22 @@ class AuthSession {
       username: username,
       role: role,
     );
+  }
+
+  static Map<String, dynamic>? _tokensFrom(Map<String, dynamic> data) {
+    final nested = data['tokens'];
+    if (nested is Map<String, dynamic>) {
+      return nested;
+    }
+
+    final access = data['access'];
+    final refresh = data['refresh'];
+    if (access != null || refresh != null) {
+      return {
+        'access': access,
+        'refresh': refresh,
+      };
+    }
+    return null;
   }
 }

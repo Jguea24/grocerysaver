@@ -17,7 +17,6 @@ class RegisterView extends StatefulWidget {
 
 class _RegisterViewState extends State<RegisterView> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _addressController = TextEditingController();
@@ -29,15 +28,7 @@ class _RegisterViewState extends State<RegisterView> {
   bool _obscureConfirmPassword = true;
 
   @override
-  void initState() {
-    super.initState();
-    // Los roles se cargan al entrar para poblar el dropdown.
-    widget.viewModel.loadRoles();
-  }
-
-  @override
   void dispose() {
-    _usernameController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
     _addressController.dispose();
@@ -80,7 +71,7 @@ class _RegisterViewState extends State<RegisterView> {
     }
 
     final ok = await widget.viewModel.register(
-      username: _usernameController.text.trim(),
+      username: _buildUsername(),
       email: _emailController.text.trim(),
       password: _passwordController.text,
       confirmPassword: _confirmController.text,
@@ -96,12 +87,25 @@ class _RegisterViewState extends State<RegisterView> {
     }
 
     if (ok) {
-      final message = widget.viewModel.infoMessage ?? 'Registro exitoso.';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
       Navigator.pop(context);
     }
+  }
+
+  /// Genera un username estable para backends que aun lo requieren.
+  String _buildUsername() {
+    final first = _firstNameController.text.trim().toLowerCase();
+    final last = _lastNameController.text.trim().toLowerCase();
+    final email = _emailController.text.trim().toLowerCase();
+
+    final seed = [first, last].where((part) => part.isNotEmpty).join('.');
+    final fallback = email.split('@').first.trim();
+    final raw = seed.isNotEmpty ? seed : fallback;
+    final normalized = raw.replaceAll(RegExp(r'[^a-z0-9._]'), '');
+
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+    return 'usuario${DateTime.now().millisecondsSinceEpoch}';
   }
 
   @override
@@ -150,53 +154,6 @@ class _RegisterViewState extends State<RegisterView> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 20),
-                      TextFormField(
-                        controller: _usernameController,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Usuario',
-                          prefixIcon: Icon(Icons.alternate_email_rounded),
-                        ),
-                        validator: (value) {
-                          final text = (value ?? '').trim();
-                          if (text.isEmpty) return 'Ingresa tu usuario.';
-                          if (text.length < 3) return 'Minimo 3 caracteres.';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: vm.roles.contains(vm.selectedRole)
-                            ? vm.selectedRole
-                            : null,
-                        onChanged: vm.isLoading || vm.isLoadingRoles
-                            ? null
-                            : vm.selectRole,
-                        items: vm.roles
-                            .map(
-                              (role) => DropdownMenuItem<String>(
-                                value: role,
-                                child: Text(role),
-                              ),
-                            )
-                            .toList(),
-                        decoration: const InputDecoration(
-                          labelText: 'Rol',
-                          prefixIcon: Icon(Icons.verified_user_outlined),
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').isEmpty) {
-                            return 'Selecciona un rol.';
-                          }
-                          return null;
-                        },
-                      ),
-                      if (vm.isLoadingRoles)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text('Cargando roles...'),
-                        ),
-                      const SizedBox(height: 12),
                       TextFormField(
                         controller: _firstNameController,
                         textInputAction: TextInputAction.next,
@@ -338,6 +295,27 @@ class _RegisterViewState extends State<RegisterView> {
                         },
                       ),
                       const SizedBox(height: 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: vm.infoMessage == null
+                            ? const SizedBox.shrink()
+                            : Container(
+                                key: ValueKey(vm.infoMessage),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE9F7EF),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  vm.infoMessage!,
+                                  style: const TextStyle(
+                                    color: Color(0xFF1E7B4D),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      if (vm.infoMessage != null) const SizedBox(height: 12),
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
                         child: vm.errorMessage == null

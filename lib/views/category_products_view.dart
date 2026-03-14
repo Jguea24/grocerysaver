@@ -1,8 +1,11 @@
 // Pantalla de productos filtrados por una categoria concreta.
 import 'package:flutter/material.dart';
 
+import '../components/product_detail_layout.dart';
 import '../services/api_config.dart';
 import '../services/catalog_api.dart';
+import '../services/cart_api.dart';
+import '../viewmodels/cart_viewmodel.dart';
 
 /// Muestra productos pertenecientes a una categoria especifica.
 class CategoryProductsView extends StatefulWidget {
@@ -21,6 +24,7 @@ class CategoryProductsView extends StatefulWidget {
 
 class _CategoryProductsViewState extends State<CategoryProductsView> {
   late final CatalogApi _api;
+  late final CartViewModel _cartViewModel;
   bool _isLoading = false;
   String? _errorMessage;
   List<Map<String, dynamic>> _products = const [];
@@ -29,7 +33,15 @@ class _CategoryProductsViewState extends State<CategoryProductsView> {
   void initState() {
     super.initState();
     _api = CatalogApi(ApiConfig.baseUrl);
+    _cartViewModel = CartViewModel(api: CartApi(ApiConfig.baseUrl));
+    _cartViewModel.loadCart();
     _loadProducts();
+  }
+
+  @override
+  void dispose() {
+    _cartViewModel.dispose();
+    super.dispose();
   }
 
   /// Consulta los productos de la categoria seleccionada.
@@ -131,6 +143,7 @@ class _CategoryProductsViewState extends State<CategoryProductsView> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _CategoryProductDetailView(
+          product: product,
           name: _name(product),
           description: _description(product),
           imageUrl: _imageUrl(product),
@@ -139,6 +152,7 @@ class _CategoryProductsViewState extends State<CategoryProductsView> {
           bestOption: _bestOption(product),
           categoryName: _categoryName(product),
           prices: _priceRows(product),
+          cartViewModel: _cartViewModel,
         ),
       ),
     );
@@ -341,6 +355,7 @@ class _ProductTile extends StatelessWidget {
 /// Vista de detalle para un producto dentro de la categoria.
 class _CategoryProductDetailView extends StatelessWidget {
   const _CategoryProductDetailView({
+    required this.product,
     required this.name,
     required this.description,
     required this.imageUrl,
@@ -349,8 +364,10 @@ class _CategoryProductDetailView extends StatelessWidget {
     required this.bestOption,
     required this.categoryName,
     required this.prices,
+    required this.cartViewModel,
   });
 
+  final Map<String, dynamic> product;
   final String name;
   final String description;
   final String? imageUrl;
@@ -359,116 +376,136 @@ class _CategoryProductDetailView extends StatelessWidget {
   final String bestOption;
   final String categoryName;
   final List<_StorePrice> prices;
+  final CartViewModel cartViewModel;
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(name)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if ((imageUrl ?? '').isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                imageUrl!,
-                height: 180,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
-            ),
-          if ((imageUrl ?? '').isNotEmpty) const SizedBox(height: 12),
-          Text(
-            description,
-            style: const TextStyle(color: Color(0xFF4A5965), fontSize: 14),
-          ),
-          const SizedBox(height: 12),
-          _InfoLine(label: 'Categoria', value: categoryName),
-          _InfoLine(label: 'Precio', value: price),
-          _InfoLine(label: 'Tiendas', value: stores),
-          _InfoLine(label: 'Mejor opcion', value: bestOption),
-          const SizedBox(height: 14),
-          const Text(
-            'Precios por tienda',
-            style: TextStyle(
-              color: Color(0xFF1A242D),
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (prices.isEmpty)
-            const Text(
-              'Sin precios disponibles',
-              style: TextStyle(color: Color(0xFF7A8A97)),
-            )
-          else
-            ...prices.map(
-              (row) => Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFDDE3E8)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        row.store,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    Text(
-                      row.price,
-                      style: const TextStyle(
-                        color: Color(0xFF1F6A47),
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
+  int? _productId() {
+    final raw = product['id'] ?? product['product_id'] ?? product['productId'];
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse((raw ?? '').toString().trim());
   }
-}
 
-/// Fila simple de metadatos usada en el detalle.
-class _InfoLine extends StatelessWidget {
-  const _InfoLine({required this.label, required this.value});
+  int? _storeIdFromMap(Map<String, dynamic>? data) {
+    if (data == null) return null;
+    final nestedStore = data['store'];
+    final raw =
+        data['store_id'] ??
+        data['storeId'] ??
+        (nestedStore is Map<String, dynamic>
+            ? (nestedStore['id'] ?? nestedStore['store_id'])
+            : null);
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse((raw ?? '').toString().trim());
+  }
 
-  final String label;
-  final String value;
+  int? _preferredStoreId() {
+    final best = product['best_option'];
+    if (best is Map<String, dynamic>) {
+      final bestStoreId = _storeIdFromMap(best);
+      if (bestStoreId != null) return bestStoreId;
+    }
+    for (final row in product['prices'] is List ? product['prices'] as List : const []) {
+      if (row is Map<String, dynamic>) {
+        final candidate = _storeIdFromMap(row);
+        if (candidate != null) return candidate;
+      }
+    }
+    return null;
+  }
+
+  num _unitPrice() {
+    final raw = product['best_price'] ?? product['price'] ?? product['min_price'];
+    if (raw is num) return raw;
+    return num.tryParse((raw ?? '').toString().trim()) ?? 0;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          Text(
-            '$label: ',
-            style: const TextStyle(
-              color: Color(0xFF42505B),
-              fontWeight: FontWeight.w700,
+    return AnimatedBuilder(
+      animation: cartViewModel,
+      builder: (context, _) {
+        return ProductDetailLayout(
+          title: name,
+          description: description,
+          imageUrl: imageUrl,
+          vendorName: bestOption == '-' ? 'Tienda disponible' : bestOption,
+          unitPrice: _unitPrice(),
+          priceLabel: price,
+          oldPriceLabel: null,
+          ratingLabel: '',
+          reviewsLabel: '',
+          categoryLabel: categoryName,
+          badgeLabel: bestOption == '-' ? null : bestOption,
+          isSaving: cartViewModel.isSaving,
+          onCartTap: null,
+          onAddToCart: (quantity) async {
+            final productId = _productId();
+            if (productId == null) return;
+            final ok = await cartViewModel.addItem(
+              productId: productId,
+              quantity: quantity,
+              storeId: _preferredStoreId(),
+            );
+            if (!context.mounted) return;
+            final message = ok
+                ? (cartViewModel.infoMessage ?? 'Producto agregado al carrito.')
+                : (cartViewModel.errorMessage ??
+                      'No se pudo agregar el producto.');
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(content: Text(message)));
+          },
+          extraSections: [
+            const Text(
+              'Precios por tienda',
+              style: TextStyle(
+                color: Color(0xFF1A242D),
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
             ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Color(0xFF42505B),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+            const SizedBox(height: 10),
+            if (prices.isEmpty)
+              const Text(
+                'Sin precios disponibles',
+                style: TextStyle(color: Color(0xFF7A8A97)),
+              )
+            else
+              ...prices.map(
+                (row) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFDDE3E8)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          row.store,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Text(
+                        row.price,
+                        style: const TextStyle(
+                          color: Color(0xFF1F6A47),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

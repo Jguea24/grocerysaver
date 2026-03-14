@@ -22,7 +22,8 @@ class ApiConfig {
     }
 
     if (kIsWeb) {
-      return 'http://127.0.0.1:8000/api';
+      final host = Uri.base.host.isEmpty ? '127.0.0.1' : Uri.base.host;
+      return '${Uri.base.scheme}://$host:8000/api';
     }
 
     switch (defaultTargetPlatform) {
@@ -35,5 +36,38 @@ class ApiConfig {
       case TargetPlatform.fuchsia:
         return 'http://127.0.0.1:8000/api';
     }
+  }
+
+  /// Devuelve el origen publico del backend sin el sufijo `/api`.
+  static Uri get backendOrigin {
+    final uri = Uri.parse(baseUrl);
+    final path = uri.path.endsWith('/api')
+        ? uri.path.substring(0, uri.path.length - 4)
+        : uri.path;
+    return uri.replace(path: path, query: null, fragment: null);
+  }
+
+  /// Reescribe URLs del backend para que sean accesibles desde la plataforma actual.
+  static String resolveBackendUrl(String rawUrl) {
+    final text = rawUrl.trim();
+    if (text.isEmpty) return text;
+
+    final uri = Uri.tryParse(text);
+    if (uri == null) return text;
+    if (!uri.hasScheme) {
+      return backendOrigin.resolveUri(uri).toString();
+    }
+
+    final host = uri.host.toLowerCase();
+    if (host == 'localhost' || host == '127.0.0.1' || host == '10.0.2.2') {
+      final origin = backendOrigin;
+      return uri.replace(
+        scheme: origin.scheme,
+        host: origin.host,
+        port: origin.hasPort ? origin.port : null,
+      ).toString();
+    }
+
+    return uri.toString();
   }
 }

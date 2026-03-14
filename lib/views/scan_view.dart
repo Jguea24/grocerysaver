@@ -291,6 +291,8 @@ class _ScanViewState extends State<ScanView> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final product = _result?['product'];
     final matched = _result?['matched'] == true;
+    final productMap = product is Map<String, dynamic> ? product : null;
+    final priceRows = productMap == null ? const <Map<String, dynamic>>[] : _productPriceRows(productMap);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Escaneo de productos')),
@@ -563,8 +565,80 @@ class _ScanViewState extends State<ScanView> with WidgetsBindingObserver {
                     _resultRow('Nombre', '${product['name'] ?? '-'}'),
                     _resultRow('Marca', '${product['brand'] ?? '-'}'),
                     _resultRow('Descripcion', '${product['description'] ?? '-'}'),
-                    if (product['price'] != null)
-                      _resultRow('Precio', '${product['price']}'),
+                    if (_productBestPrice(product) != null)
+                      _resultRow('Mejor precio', _productBestPrice(product)!),
+                    _resultRow(
+                      'Tiendas disponibles',
+                      _productStoresAvailable(product),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Precios',
+                      style: TextStyle(
+                        color: Color(0xFF1F2A33),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (priceRows.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      ...priceRows.map(
+                        (row) => Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF7FAF8),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFDDE3E8)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _priceRowStoreName(row),
+                                      style: const TextStyle(
+                                        color: Color(0xFF1F2A33),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    if (_priceRowUpdatedAt(row) != null) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Actualizado: ${_priceRowUpdatedAt(row)!}',
+                                        style: const TextStyle(
+                                          color: Color(0xFF6A7884),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _priceRowPrice(row),
+                                style: const TextStyle(
+                                  color: Color(0xFF2F7D57),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        'No hay precios registrados',
+                        style: TextStyle(
+                          color: Color(0xFF6A7884),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ] else
                     _resultRow('Respuesta', _result.toString()),
                 ],
@@ -574,6 +648,56 @@ class _ScanViewState extends State<ScanView> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  /// Extrae una lista de precios por tienda tolerando distintos contratos.
+  List<Map<String, dynamic>> _productPriceRows(Map<String, dynamic> product) {
+    final prices = product['prices'];
+    if (prices is! List) return const [];
+    return prices.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// Devuelve el mejor precio disponible si existe una clave dedicada.
+  String? _productBestPrice(Map<String, dynamic> product) {
+    final raw = product['best_price'];
+    if (raw == null || raw.toString().trim().isEmpty) return null;
+    return '\$$raw';
+  }
+
+  /// Devuelve cuantas tiendas tienen precio para el producto.
+  String _productStoresAvailable(Map<String, dynamic> product) {
+    final raw = product['stores_available'];
+    if (raw != null && raw.toString().trim().isNotEmpty) {
+      return raw.toString();
+    }
+    return '${_productPriceRows(product).length}';
+  }
+
+  /// Resuelve el nombre de tienda para una fila de precios.
+  String _priceRowStoreName(Map<String, dynamic> row) {
+    final store = row['store'];
+    if (store is Map<String, dynamic>) {
+      final raw = store['name'] ?? store['store_name'] ?? store['title'];
+      final text = (raw ?? '').toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    final raw = row['store_name'] ?? row['store'] ?? row['market'];
+    final text = (raw ?? '').toString().trim();
+    return text.isEmpty ? 'Tienda' : text;
+  }
+
+  /// Devuelve la fecha de actualizacion de una fila de precios si existe.
+  String? _priceRowUpdatedAt(Map<String, dynamic> row) {
+    final raw = row['updated_at'];
+    final text = (raw ?? '').toString().trim();
+    return text.isEmpty ? null : text;
+  }
+
+  /// Formatea el precio de una fila individual.
+  String _priceRowPrice(Map<String, dynamic> row) {
+    final raw = row['price'] ?? row['amount'] ?? row['value'];
+    if (raw == null || raw.toString().trim().isEmpty) return 'N/A';
+    return '\$$raw';
   }
 
   /// Fila simple clave-valor para renderizar la respuesta del escaneo.

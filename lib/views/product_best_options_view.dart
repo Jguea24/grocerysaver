@@ -1,14 +1,21 @@
 // Comparador de precios y detalle de mejores opciones por producto.
 import 'package:flutter/material.dart';
 
+import '../components/product_detail_layout.dart';
 import '../services/api_service.dart';
+import '../viewmodels/cart_viewmodel.dart';
 import '../viewmodels/catalog_viewmodel.dart';
 
 /// Pantalla de comparacion de precios reutilizando el catalogo ya cargado.
 class ProductBestOptionsView extends StatefulWidget {
-  const ProductBestOptionsView({super.key, required this.catalogViewModel});
+  const ProductBestOptionsView({
+    super.key,
+    required this.catalogViewModel,
+    required this.cartViewModel,
+  });
 
   final CatalogViewModel catalogViewModel;
+  final CartViewModel cartViewModel;
 
   @override
   State<ProductBestOptionsView> createState() => _ProductBestOptionsViewState();
@@ -16,6 +23,7 @@ class ProductBestOptionsView extends StatefulWidget {
 
 class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
   int? _selectedProductId;
+  int _selectedQuantity = 1;
   Map<String, dynamic>? _compareData;
   bool _isComparing = false;
   String? _compareError;
@@ -24,6 +32,7 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
   @override
   void initState() {
     super.initState();
+    widget.cartViewModel.loadCart();
     // La seleccion depende del primer frame porque el catalogo puede llegar despues.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureSelectionAndCompare();
@@ -32,7 +41,10 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
 
   /// Recarga el catalogo y fuerza una nueva comparacion del producto activo.
   Future<void> _refresh() async {
-    await widget.catalogViewModel.refresh();
+    await Future.wait([
+      widget.catalogViewModel.refresh(),
+      widget.cartViewModel.refresh(),
+    ]);
     await _ensureSelectionAndCompare(force: true);
   }
 
@@ -176,10 +188,81 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
     return rows.whereType<Map<String, dynamic>>().toList();
   }
 
+  /// Busca el producto actualmente seleccionado.
+  _CompareProductItem? _selectedProduct(List<_CompareProductItem> products) {
+    final selectedId = _selectedProductId;
+    if (selectedId == null) return null;
+    for (final item in products) {
+      if (item.id == selectedId) return item;
+    }
+    return null;
+  }
+
+  /// Obtiene `store_id` desde contratos planos o anidados.
+  int? _storeIdFromMap(Map<String, dynamic>? data) {
+    if (data == null) return null;
+    final nestedStore = data['store'];
+    final raw =
+        data['store_id'] ??
+        data['storeId'] ??
+        (nestedStore is Map<String, dynamic>
+            ? (nestedStore['id'] ?? nestedStore['store_id'])
+            : null);
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse((raw ?? '').toString().trim());
+  }
+
+  /// Intenta conservar la tienda mas conveniente al agregar al carrito.
+  int? _preferredStoreId(Map<String, dynamic> product) {
+    final best = product['best_option'];
+    if (best is Map<String, dynamic>) {
+      final bestStoreId = _storeIdFromMap(best);
+      if (bestStoreId != null) return bestStoreId;
+    }
+
+    Map<String, dynamic>? cheapestRow;
+    num? cheapestPrice;
+    for (final row in widget.catalogViewModel.productPriceRows(product)) {
+      final price = _asNum(row['price'] ?? row['amount'] ?? row['value']);
+      if (price == null) continue;
+      if (cheapestPrice == null || price < cheapestPrice) {
+        cheapestPrice = price;
+        cheapestRow = row;
+      }
+    }
+    return _storeIdFromMap(cheapestRow);
+  }
+
+  /// Agrega el producto seleccionado al carrito autenticado.
+  Future<void> _addSelectedToCart() async {
+    final selected = _selectedProduct(_productsForCompare());
+    if (selected == null) return;
+
+    final ok = await widget.cartViewModel.addItem(
+      productId: selected.id,
+      quantity: _selectedQuantity,
+      storeId: _preferredStoreId(selected.product),
+    );
+    if (!mounted) return;
+
+    final message = ok
+        ? (widget.cartViewModel.infoMessage ?? 'Producto agregado al carrito.')
+        : (widget.cartViewModel.errorMessage ??
+              'No se pudo agregar el producto al carrito.');
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: widget.catalogViewModel,
+      animation: Listenable.merge([
+        widget.catalogViewModel,
+        widget.cartViewModel,
+      ]),
       builder: (context, _) {
         final products = _productsForCompare();
         final selectedId = _selectedProductId != null &&
@@ -213,7 +296,18 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
           });
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Comparador de precios')),
+          appBar: AppBar(
+            title: const Text('Comparador de precios'),
+            actions: [
+              IconButton(
+                tooltip: 'Recargar carrito',
+                onPressed: widget.cartViewModel.isLoading
+                    ? null
+                    : widget.cartViewModel.refresh,
+                icon: const Icon(Icons.shopping_cart_outlined),
+              ),
+            ],
+          ),
           body: RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
@@ -290,19 +384,125 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
                           ),
                         ),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _isComparing || selectedId == null
-                                ? null
-                                : () => _compareByProductId(selectedId),
-                            icon: const Icon(Icons.price_check_rounded),
-                            label: const Text('Comparar ahora'),
-                          ),
+                        Row(
+                          children: [
+                            const Text(
+                              'Cantidad',
+                              style: TextStyle(
+                                color: Color(0xFF42505B),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: _selectedQuantity > 1
+                                  ? () {
+                                      setState(() {
+                                        _selectedQuantity--;
+                                      });
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                            Text(
+                              '$_selectedQuantity',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: _selectedQuantity < 99
+                                  ? () {
+                                      setState(() {
+                                        _selectedQuantity++;
+                                      });
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.add_circle_outline),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: _isComparing || selectedId == null
+                                    ? null
+                                    : () => _compareByProductId(selectedId),
+                                icon: const Icon(Icons.price_check_rounded),
+                                label: const Text('Comparar'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed:
+                                    widget.cartViewModel.isSaving ||
+                                        selectedId == null
+                                    ? null
+                                    : _addSelectedToCart,
+                                icon: widget.cartViewModel.isSaving
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.add_shopping_cart_rounded,
+                                      ),
+                                label: const Text('Agregar'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
+                const SizedBox(height: 12),
+                _CartSummaryCard(
+                  totalItems: widget.cartViewModel.totalItems,
+                  distinctProducts: widget.cartViewModel.distinctProducts,
+                  subtotal: _formatCurrencyRaw(widget.cartViewModel.subtotal),
+                  isLoading: widget.cartViewModel.isLoading,
+                  isSaving: widget.cartViewModel.isSaving,
+                  onRefresh: widget.cartViewModel.refresh,
+                  onClear:
+                      widget.cartViewModel.totalItems == 0 ||
+                          widget.cartViewModel.isSaving
+                      ? null
+                      : () async {
+                          final ok = await widget.cartViewModel.clear();
+                          if (!context.mounted) return;
+                          final message = ok
+                              ? (widget.cartViewModel.infoMessage ??
+                                    'Carrito vaciado.')
+                              : (widget.cartViewModel.errorMessage ??
+                                    'No se pudo vaciar el carrito.');
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(content: Text(message)));
+                        },
+                ),
+                if (widget.cartViewModel.errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  _InfoBox(
+                    message: widget.cartViewModel.errorMessage!,
+                    color: const Color(0xFFFCEAEA),
+                    textColor: const Color(0xFFAC2E2E),
+                  ),
+                ],
+                if (widget.cartViewModel.infoMessage != null &&
+                    widget.cartViewModel.errorMessage == null) ...[
+                  const SizedBox(height: 12),
+                  _InfoBox(
+                    message: widget.cartViewModel.infoMessage!,
+                    color: const Color(0xFFE9F5ED),
+                    textColor: const Color(0xFF20573A),
+                  ),
+                ],
                 if (_compareError != null) ...[
                   const SizedBox(height: 12),
                   _InfoBox(
@@ -368,6 +568,22 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
                           icon: Icons.savings_rounded,
                           title: 'Ahorro vs mas caro',
                           value: _formatCurrencyRaw(savings),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.tonalIcon(
+                            onPressed: selectedId == null ||
+                                    widget.cartViewModel.isSaving
+                                ? null
+                                : _addSelectedToCart,
+                            icon: const Icon(Icons.add_shopping_cart_rounded),
+                            label: Text(
+                              widget.cartViewModel.isSaving
+                                  ? 'Agregando...'
+                                  : 'Agregar mejor opcion al carrito',
+                            ),
+                          ),
                         ),
                         const SizedBox(height: 12),
                         Text(
@@ -457,6 +673,7 @@ class _ProductBestOptionsViewState extends State<ProductBestOptionsView> {
                               builder: (_) => ProductBestOptionDetailView(
                                 product: item.product,
                                 catalogViewModel: widget.catalogViewModel,
+                                cartViewModel: widget.cartViewModel,
                               ),
                             ),
                           );
@@ -479,79 +696,179 @@ class ProductBestOptionDetailView extends StatelessWidget {
     super.key,
     required this.product,
     required this.catalogViewModel,
+    required this.cartViewModel,
   });
 
   final Map<String, dynamic> product;
   final CatalogViewModel catalogViewModel;
+  final CartViewModel cartViewModel;
+
+  int? _productId() {
+    final raw = product['id'] ?? product['product_id'] ?? product['productId'];
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse((raw ?? '').toString().trim());
+  }
+
+  int? _storeIdFromMap(Map<String, dynamic>? data) {
+    if (data == null) return null;
+    final nestedStore = data['store'];
+    final raw =
+        data['store_id'] ??
+        data['storeId'] ??
+        (nestedStore is Map<String, dynamic>
+            ? (nestedStore['id'] ?? nestedStore['store_id'])
+            : null);
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    return int.tryParse((raw ?? '').toString().trim());
+  }
+
+  int? _preferredStoreId() {
+    final best = product['best_option'];
+    if (best is Map<String, dynamic>) {
+      final bestStoreId = _storeIdFromMap(best);
+      if (bestStoreId != null) return bestStoreId;
+    }
+
+    num? cheapestValue;
+    Map<String, dynamic>? cheapestRow;
+    for (final row in catalogViewModel.productPriceRows(product)) {
+      final raw = row['price'] ?? row['amount'] ?? row['value'];
+      final value = raw is num ? raw : num.tryParse((raw ?? '').toString());
+      if (value == null) continue;
+      if (cheapestValue == null || value < cheapestValue) {
+        cheapestValue = value;
+        cheapestRow = row;
+      }
+    }
+    return _storeIdFromMap(cheapestRow);
+  }
+
+  String _formatCurrency(num raw) {
+    if (raw == raw.roundToDouble()) {
+      return '\$${raw.toStringAsFixed(0)}';
+    }
+    return '\$${raw.toStringAsFixed(2)}';
+  }
+
+  num _unitPrice() {
+    final raw =
+        product['best_price'] ?? product['price'] ?? product['min_price'];
+    if (raw is num) return raw;
+    return num.tryParse((raw ?? '').toString().trim()) ?? 0;
+  }
 
   @override
   Widget build(BuildContext context) {
     final imageUrl = catalogViewModel.productImageUrl(product);
     final rows = catalogViewModel.productPriceRows(product);
+    final productId = _productId();
 
-    return Scaffold(
-      appBar: AppBar(title: Text(catalogViewModel.productName(product))),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (imageUrl != null && imageUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.network(
-                imageUrl,
-                height: 180,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
+    return AnimatedBuilder(
+      animation: cartViewModel,
+      builder: (context, _) {
+        return ProductDetailLayout(
+          title: catalogViewModel.productName(product),
+          description: catalogViewModel.productDescription(product),
+          imageUrl: imageUrl,
+          vendorName: catalogViewModel.productBestOptionStore(product),
+          unitPrice: _unitPrice(),
+          priceLabel: catalogViewModel.productBestOptionPrice(product),
+          ratingLabel: '',
+          reviewsLabel: '',
+          categoryLabel: catalogViewModel.productCategoryName(product),
+          badgeLabel:
+              'Mejor opcion: ${catalogViewModel.productBestOptionStore(product)}',
+          isSaving: cartViewModel.isSaving,
+          onCartTap: null,
+          onAddToCart: (quantity) async {
+            if (productId == null) return;
+            final ok = await cartViewModel.addItem(
+              productId: productId,
+              quantity: quantity,
+              storeId: _preferredStoreId(),
+            );
+            if (!context.mounted) return;
+            final message = ok
+                ? (cartViewModel.infoMessage ?? 'Producto agregado al carrito.')
+                : (cartViewModel.errorMessage ??
+                      'No se pudo agregar el producto.');
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(content: Text(message)));
+          },
+          extraSections: [
+            _CartSummaryCard(
+              totalItems: cartViewModel.totalItems,
+              distinctProducts: cartViewModel.distinctProducts,
+              subtotal: _formatCurrency(cartViewModel.subtotal),
+              isLoading: cartViewModel.isLoading,
+              isSaving: cartViewModel.isSaving,
+              onRefresh: cartViewModel.refresh,
+              onClear:
+                  cartViewModel.totalItems == 0 || cartViewModel.isSaving
+                  ? null
+                  : () async {
+                      final ok = await cartViewModel.clear();
+                      if (!context.mounted) return;
+                      final message = ok
+                          ? (cartViewModel.infoMessage ?? 'Carrito vaciado.')
+                          : (cartViewModel.errorMessage ??
+                                'No se pudo vaciar el carrito.');
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(SnackBar(content: Text(message)));
+                    },
             ),
-          if (imageUrl != null && imageUrl.isNotEmpty)
-            const SizedBox(height: 12),
-          Text(
-            'Categoria: ${catalogViewModel.productCategoryName(product)}',
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            catalogViewModel.productDescription(product),
-            style: const TextStyle(color: Color(0xFF5E6B76), fontSize: 13),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Mejor opcion: ${catalogViewModel.productBestOptionStore(product)} (${catalogViewModel.productBestOptionPrice(product)})',
-            style: const TextStyle(
-              color: Color(0xFF1F6A47),
-              fontWeight: FontWeight.w700,
+            const SizedBox(height: 18),
+            Text(
+              'Precios por tienda (${catalogViewModel.productStoresAvailable(product)})',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Precios por tienda (${catalogViewModel.productStoresAvailable(product)})',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          if (rows.isEmpty)
-            const Text(
-              'Sin precios disponibles',
-              style: TextStyle(color: Color(0xFF7A8A97)),
-            )
-          else
-            ...rows.map(
-              (row) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  dense: true,
-                  title: Text(catalogViewModel.priceRowStoreName(row)),
-                  trailing: Text(
-                    catalogViewModel.priceRowPrice(row),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+            const SizedBox(height: 8),
+            if (rows.isEmpty)
+              const Text(
+                'Sin precios disponibles',
+                style: TextStyle(color: Color(0xFF7A8A97)),
+              )
+            else
+              ...rows.map(
+                (row) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFDDE3E8)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          catalogViewModel.priceRowStoreName(row),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Text(
+                        catalogViewModel.priceRowPrice(row),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF2F7D57),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 }
@@ -694,6 +1011,108 @@ class _MetricTile extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Resumen compacto del carrito autenticado con acciones basicas.
+class _CartSummaryCard extends StatelessWidget {
+  const _CartSummaryCard({
+    required this.totalItems,
+    required this.distinctProducts,
+    required this.subtotal,
+    required this.isLoading,
+    required this.isSaving,
+    required this.onRefresh,
+    required this.onClear,
+  });
+
+  final int totalItems;
+  final int distinctProducts;
+  final String subtotal;
+  final bool isLoading;
+  final bool isSaving;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function()? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFCF4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF0D8A8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.shopping_cart_checkout_rounded,
+                color: Color(0xFF915F0A),
+              ),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Carrito autenticado',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF5F450D),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Recargar carrito',
+                onPressed: isLoading ? null : onRefresh,
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+            ],
+          ),
+          if (isLoading) ...[
+            const SizedBox(height: 4),
+            const LinearProgressIndicator(minHeight: 3),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricTile(
+                  icon: Icons.shopping_basket_rounded,
+                  title: 'Items',
+                  value: '$totalItems',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricTile(
+                  icon: Icons.category_rounded,
+                  title: 'Productos',
+                  value: '$distinctProducts',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricTile(
+                  icon: Icons.attach_money_rounded,
+                  title: 'Subtotal',
+                  value: subtotal,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isSaving ? null : onClear,
+              icon: const Icon(Icons.delete_sweep_outlined),
+              label: Text(isSaving ? 'Procesando...' : 'Vaciar carrito'),
             ),
           ),
         ],

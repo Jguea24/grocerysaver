@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_config.dart';
 import '../services/jobs_api.dart';
@@ -17,6 +18,7 @@ class ExportJobsView extends StatefulWidget {
 class _ExportJobsViewState extends State<ExportJobsView> {
   late final JobsApi _api;
   final TextEditingController _searchController = TextEditingController();
+  String _selectedFormat = 'pdf';
 
   Timer? _pollingTimer;
   bool _isSubmitting = false;
@@ -58,7 +60,8 @@ class _ExportJobsViewState extends State<ExportJobsView> {
     });
 
     try {
-      final data = await _api.enqueueExportProductsJob(
+      final data = await _api.createExportJob(
+        format: _selectedFormat,
         search: _searchController.text,
       );
       final job = _extractJob(data);
@@ -68,6 +71,7 @@ class _ExportJobsViewState extends State<ExportJobsView> {
         _jobId = _text(job['job_id']);
         _jobType = _text(job['job_type']);
         _jobStatus = _text(job['status'], fallback: 'queued');
+        _resultUrl = _resolvedResultUrl(job['result_url']);
         _cacheStatus = _api.lastCacheStatus;
         _successMessage = _text(
           data['message'],
@@ -128,7 +132,7 @@ class _ExportJobsViewState extends State<ExportJobsView> {
       if (!mounted) return;
       setState(() {
         _jobStatus = status;
-        _resultUrl = _textOrNull(job['result_url']);
+        _resultUrl = _resolvedResultUrl(job['result_url']);
         _result = job['result'] is Map<String, dynamic>
             ? job['result'] as Map<String, dynamic>
             : null;
@@ -177,6 +181,13 @@ class _ExportJobsViewState extends State<ExportJobsView> {
   String? _textOrNull(dynamic value) {
     final text = _text(value);
     return text.isEmpty ? null : text;
+  }
+
+  /// Normaliza la URL del archivo para que no dependa de localhost/emulador.
+  String? _resolvedResultUrl(dynamic value) {
+    final raw = _textOrNull(value);
+    if (raw == null) return null;
+    return ApiConfig.resolveBackendUrl(raw);
   }
 
   /// Interpreta flags booleanos serializados como texto o numero.
@@ -251,6 +262,27 @@ class _ExportJobsViewState extends State<ExportJobsView> {
             ),
           ),
           const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _selectedFormat,
+            decoration: const InputDecoration(
+              labelText: 'Formato',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'txt', child: Text('TXT')),
+              DropdownMenuItem(value: 'csv', child: Text('CSV')),
+              DropdownMenuItem(value: 'pdf', child: Text('PDF')),
+            ],
+            onChanged: _isSubmitting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _selectedFormat = value;
+                    });
+                  },
+          ),
+          const SizedBox(height: 10),
           TextField(
             controller: _searchController,
             decoration: const InputDecoration(
@@ -319,15 +351,41 @@ class _ExportJobsViewState extends State<ExportJobsView> {
             ],
           ),
           const SizedBox(height: 8),
-          _StatusLine(label: 'Job ID', value: _jobId ?? 'Sin job'),
-          _StatusLine(label: 'Tipo', value: _jobType ?? '-'),
-          _StatusLine(label: 'Estado', value: _jobStatus ?? '-'),
+          _StatusLine(
+            label: 'Job ID',
+            value: _jobId ?? 'Sin job',
+            monospaced: true,
+          ),
+          _StatusLine(
+            label: 'Tipo',
+            value: _formatJobType(_jobType),
+          ),
+          _StatusLine(
+            label: 'Formato',
+            value: _formatFileFormat(),
+          ),
+          _StatusLine(
+            label: 'Estado',
+            value: _formatJobStatus(_jobStatus),
+            isStatus: true,
+          ),
           _StatusLine(
             label: 'Finalizado',
             value: _isFinished ? 'Si' : 'No',
           ),
           if (_resultUrl != null)
             _StatusLine(label: 'Archivo', value: _resultUrl!),
+          if (_isFinished && _resultUrl != null) ...[
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _openResultUrl,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: const Text('Abrir archivo generado'),
+              ),
+            ),
+          ],
           if (_result != null && _result!.isNotEmpty) ...[
             const SizedBox(height: 10),
             const Text(
@@ -348,6 +406,68 @@ class _ExportJobsViewState extends State<ExportJobsView> {
         ],
       ),
     );
+  }
+
+  /// Traduce el tipo tecnico del job a un texto mas legible.
+  String _formatJobType(String? raw) {
+    final value = _text(raw, fallback: '-').toLowerCase();
+    switch (value) {
+      case 'export_products_csv':
+        return 'Exportacion CSV de productos';
+      default:
+        return value == '-' ? value : value.replaceAll('_', ' ');
+    }
+  }
+
+  /// Traduce estados tecnicos del backend a etiquetas de interfaz.
+  String _formatJobStatus(String? raw) {
+    final value = _text(raw, fallback: '-').toLowerCase();
+    switch (value) {
+      case 'queued':
+        return 'En cola';
+      case 'pending':
+        return 'Pendiente';
+      case 'running':
+        return 'En proceso';
+      case 'completed':
+        return 'Completado';
+      case 'failed':
+        return 'Fallido';
+      default:
+        return value == '-' ? value : value.replaceAll('_', ' ');
+    }
+  }
+
+  /// Devuelve el formato real del archivo desde el resultado o la seleccion actual.
+  String _formatFileFormat() {
+    final resultFormat = _text(_result?['file_format']);
+    final value = resultFormat.isEmpty ? _selectedFormat : resultFormat;
+    return value.toUpperCase();
+  }
+
+  /// Abre la URL final del archivo cuando el job ya termino.
+  Future<void> _openResultUrl() async {
+    final raw = _resultUrl;
+    if (raw == null || raw.isEmpty) {
+      setState(() {
+        _errorMessage = 'El job no devolvio un archivo para abrir.';
+      });
+      return;
+    }
+
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      setState(() {
+        _errorMessage = 'La URL del archivo no es valida.';
+      });
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (opened || !mounted) return;
+    setState(() {
+      _errorMessage = 'No se pudo abrir el archivo generado.';
+    });
   }
 }
 
@@ -405,37 +525,59 @@ class _HeroCard extends StatelessWidget {
 
 /// Fila simple clave-valor para el estado del job.
 class _StatusLine extends StatelessWidget {
-  const _StatusLine({required this.label, required this.value});
+  const _StatusLine({
+    required this.label,
+    required this.value,
+    this.monospaced = false,
+    this.isStatus = false,
+  });
 
   final String label;
   final String value;
+  final bool monospaced;
+  final bool isStatus;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 86,
-            child: Text(
-              '$label:',
-              style: const TextStyle(
-                color: Color(0xFF42505B),
-                fontWeight: FontWeight.w700,
-              ),
+          Text(
+            '$label:',
+            style: const TextStyle(
+              color: Color(0xFF42505B),
+              fontWeight: FontWeight.w700,
             ),
           ),
-          Expanded(
-            child: Text(
+          const SizedBox(height: 2),
+          if (isStatus)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE9F5ED),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                value,
+                style: const TextStyle(
+                  color: Color(0xFF20573A),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+          else
+            SelectableText(
               value,
-              style: const TextStyle(
-                color: Color(0xFF42505B),
+              style: TextStyle(
+                color: const Color(0xFF42505B),
                 fontWeight: FontWeight.w500,
+                fontFamily: monospaced ? 'Courier' : null,
+                fontSize: monospaced ? 12.5 : 14,
+                height: 1.3,
               ),
             ),
-          ),
         ],
       ),
     );

@@ -128,6 +128,27 @@ class _LoginViewState extends State<LoginView> {
                       const SizedBox(height: 12),
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 220),
+                        child: vm.infoMessage == null
+                            ? const SizedBox.shrink()
+                            : Container(
+                                key: ValueKey(vm.infoMessage),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE9F7EF),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  vm.infoMessage!,
+                                  style: const TextStyle(
+                                    color: Color(0xFF1E7B4D),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      if (vm.infoMessage != null) const SizedBox(height: 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
                         child: vm.errorMessage == null
                             ? const SizedBox.shrink()
                             : Container(

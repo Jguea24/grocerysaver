@@ -1,5 +1,6 @@
 // Estado de perfil, direcciones, notificaciones y rifas.
 import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../services/profile_api.dart';
 
@@ -11,6 +12,8 @@ class ProfileViewModel extends ChangeNotifier {
 
   bool _isLoading = false;
   bool _isSavingNotifications = false;
+  bool _isUpdatingAvatar = false;
+  int _avatarRevision = 0;
   String? _errorMessage;
   Map<String, dynamic>? _user;
   List<Map<String, dynamic>> _addresses = const [];
@@ -20,6 +23,7 @@ class ProfileViewModel extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
   bool get isSavingNotifications => _isSavingNotifications;
+  bool get isUpdatingAvatar => _isUpdatingAvatar;
   String? get errorMessage => _errorMessage;
   Map<String, dynamic>? get user => _user;
   List<Map<String, dynamic>> get addresses => _addresses;
@@ -45,6 +49,7 @@ class ProfileViewModel extends ChangeNotifier {
       _notificationPrefs = _toMap(results[2]);
       _raffles = _toMapList(results[3]);
       _roleRequests = _toMapList(results[4]);
+      _touchAvatarRevision();
     } catch (e) {
       _errorMessage = _errorToText(e);
     } finally {
@@ -126,6 +131,63 @@ class ProfileViewModel extends ChangeNotifier {
     return int.tryParse((raw ?? '').toString()) ?? 0;
   }
 
+  /// Devuelve la URL del avatar en formato absoluto cuando existe.
+  String? avatarUrl() {
+    final raw = (_user?['avatar'] ?? '').toString().trim();
+    if (raw.isEmpty || raw.toLowerCase() == 'null') {
+      return null;
+    }
+
+    final uri = Uri.tryParse(raw);
+    final resolved = uri != null && uri.hasScheme
+        ? uri
+        : Uri.parse(_api.baseUrl).resolve(raw);
+    return resolved.replace(
+      queryParameters: {
+        ...resolved.queryParameters,
+        'v': _avatarRevision.toString(),
+      },
+    ).toString();
+  }
+
+  /// Sube un nuevo avatar y actualiza el usuario visible.
+  Future<bool> uploadAvatar(XFile file) async {
+    _isUpdatingAvatar = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final avatar = await _api.uploadAvatar(file);
+      _user = {...?_user, 'avatar': avatar};
+      _touchAvatarRevision();
+      return true;
+    } catch (e) {
+      _errorMessage = _errorToText(e);
+      return false;
+    } finally {
+      _isUpdatingAvatar = false;
+      notifyListeners();
+    }
+  }
+
+  /// Elimina el avatar actual y limpia el estado local.
+  Future<bool> deleteAvatar() async {
+    _isUpdatingAvatar = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _api.deleteAvatar();
+      _user = {...?_user, 'avatar': null};
+      _touchAvatarRevision();
+      return true;
+    } catch (e) {
+      _errorMessage = _errorToText(e);
+      return false;
+    } finally {
+      _isUpdatingAvatar = false;
+      notifyListeners();
+    }
+  }
+
   /// Entrega las claves de preferencias ya ordenadas para la UI.
   List<String> notificationKeys() {
     final keys = _notificationPrefs.keys.map((key) => key.toString()).toList();
@@ -153,9 +215,21 @@ class ProfileViewModel extends ChangeNotifier {
     return const {};
   }
 
+  /// Cambia la revision local para invalidar cache de imagen.
+  void _touchAvatarRevision() {
+    _avatarRevision = DateTime.now().millisecondsSinceEpoch;
+  }
+
   /// Traduce fallos del servicio a texto para la interfaz.
   String _errorToText(Object error) {
     if (error is ProfileApiException) return error.message;
+    if (error is FormatException) return error.message;
+    final text = error.toString().trim();
+    if (text.isNotEmpty) {
+      return text.startsWith('Exception: ')
+          ? text.substring('Exception: '.length)
+          : text;
+    }
     return 'No se pudo cargar el perfil.';
   }
 }

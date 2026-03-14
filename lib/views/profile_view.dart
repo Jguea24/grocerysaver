@@ -1,5 +1,6 @@
 // Pantalla de perfil con secciones de cuenta, preferencias y solicitudes.
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../services/api_config.dart';
 import '../services/profile_api.dart';
@@ -16,6 +17,7 @@ class ProfileView extends StatefulWidget {
 
 class _ProfileViewState extends State<ProfileView> {
   late final ProfileViewModel _viewModel;
+  final ImagePicker _picker = ImagePicker();
   bool _darkMode = false;
 
   @override
@@ -58,6 +60,9 @@ class _ProfileViewState extends State<ProfileView> {
                 _UserCard(
                   name: _viewModel.displayName(),
                   email: _viewModel.email(),
+                  avatarUrl: _viewModel.avatarUrl(),
+                  isUpdatingAvatar: _viewModel.isUpdatingAvatar,
+                  onAvatarTap: _showAvatarActions,
                 ),
                 const SizedBox(height: 12),
                 _RatingCard(
@@ -362,6 +367,66 @@ class _ProfileViewState extends State<ProfileView> {
     ).push(MaterialPageRoute(builder: (_) => const ExportJobsView()));
   }
 
+  /// Permite elegir una foto desde la galeria y la envia al backend.
+  Future<void> _pickAndUploadAvatar() async {
+    final file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+    if (file == null) return;
+
+    final ok = await _viewModel.uploadAvatar(file);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Foto de perfil actualizada.'
+              : (_viewModel.errorMessage ?? 'No se pudo actualizar la foto.'),
+        ),
+      ),
+    );
+  }
+
+  /// Elimina la foto actual del perfil.
+  Future<void> _deleteAvatar() async {
+    final ok = await _viewModel.deleteAvatar();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Foto de perfil eliminada.'
+              : (_viewModel.errorMessage ?? 'No se pudo eliminar la foto.'),
+        ),
+      ),
+    );
+  }
+
+  /// Muestra acciones rapidas para actualizar o eliminar el avatar.
+  Future<void> _showAvatarActions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: const Text('Cambiar foto'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  _pickAndUploadAvatar();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// Convierte claves snake_case a etiquetas mas legibles.
   String _formatPrefLabel(String raw) {
     final text = raw.replaceAll('_', ' ').trim();
@@ -372,64 +437,212 @@ class _ProfileViewState extends State<ProfileView> {
 
 /// Tarjeta superior con avatar, nombre y correo.
 class _UserCard extends StatelessWidget {
-  const _UserCard({required this.name, required this.email});
+  const _UserCard({
+    required this.name,
+    required this.email,
+    required this.avatarUrl,
+    required this.isUpdatingAvatar,
+    required this.onAvatarTap,
+  });
 
   final String name;
   final String email;
+  final String? avatarUrl;
+  final bool isUpdatingAvatar;
+  final VoidCallback onAvatarTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF35B6EA), width: 2.5),
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.person_rounded,
-              size: 46,
-              color: Color(0xFF9BA7B4),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          SizedBox(
+            width: 132,
+            height: 132,
+            child: Stack(
+              alignment: Alignment.topCenter,
               children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF111316),
-                  ),
+                _AvatarAction(
+                  isUpdatingAvatar: isUpdatingAvatar,
+                  onTap: onAvatarTap,
+                  child: _AvatarVisual(name: name, avatarUrl: avatarUrl),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  email,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF8D9197),
+                Positioned(
+                  right: 6,
+                  bottom: 10,
+                  child: _AvatarBadge(
+                    isUpdatingAvatar: isUpdatingAvatar,
                   ),
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 21,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF111316),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            email,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 16,
+              color: Color(0xFF8D9197),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isUpdatingAvatar ? 'Subiendo foto...' : 'Toca el avatar para cambiar la foto',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF5C6E80),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _AvatarAction extends StatelessWidget {
+  const _AvatarAction({
+    required this.child,
+    required this.isUpdatingAvatar,
+    required this.onTap,
+  });
+
+  final Widget child;
+  final bool isUpdatingAvatar;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isUpdatingAvatar ? null : onTap,
+        customBorder: const CircleBorder(),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _AvatarVisual extends StatelessWidget {
+  const _AvatarVisual({required this.name, required this.avatarUrl});
+
+  final String name;
+  final String? avatarUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 116,
+      height: 116,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFB7DBFB), Color(0xFFEAF5FF)],
+        ),
+        border: Border.all(color: const Color(0xFF8FCBFF), width: 3),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14344055),
+            blurRadius: 14,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: avatarUrl != null
+          ? Image.network(
+              avatarUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => _AvatarPlaceholder(name: name),
+            )
+          : _AvatarPlaceholder(name: name),
+    );
+  }
+}
+
+class _AvatarBadge extends StatelessWidget {
+  const _AvatarBadge({required this.isUpdatingAvatar});
+
+  final bool isUpdatingAvatar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: const Color(0xFF344055),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      alignment: Alignment.center,
+      child: isUpdatingAvatar
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(
+              Icons.photo_camera_rounded,
+              size: 16,
+              color: Colors.white,
+            ),
+    );
+  }
+}
+
+class _AvatarPlaceholder extends StatelessWidget {
+  const _AvatarPlaceholder({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.trim().isEmpty ? 'U' : name.trim()[0].toUpperCase();
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFD9ECFF), Color(0xFFF7FBFF)],
+        ),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            fontSize: 42,
+            fontWeight: FontWeight.w900,
+            color: Color(0xFF5C6E80),
+          ),
+        ),
       ),
     );
   }

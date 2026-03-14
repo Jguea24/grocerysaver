@@ -1,8 +1,10 @@
 // Cliente HTTP para datos de perfil, direcciones y preferencias.
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 /// Error especifico del modulo de perfil.
 class ProfileApiException implements Exception {
@@ -32,12 +34,18 @@ class ProfileApi {
     'Accept': 'application/json',
   };
 
-  /// Recupera headers autenticados para endpoints privados.
-  Future<Map<String, String>> _authHeaders() async {
+  /// Lee el token JWT guardado para consumir endpoints privados.
+  Future<String> _accessToken() async {
     final token = await _storage.read(key: 'access');
     if (token == null || token.isEmpty) {
       throw ProfileApiException('No access token');
     }
+    return token;
+  }
+
+  /// Recupera headers autenticados para endpoints privados.
+  Future<Map<String, String>> _authHeaders() async {
+    final token = await _accessToken();
     return {..._jsonHeaders, 'Authorization': 'Bearer $token'};
   }
 
@@ -202,6 +210,70 @@ class ProfileApi {
     return data;
   }
 
+  /// Sube el avatar actual usando multipart/form-data.
+  Future<String?> uploadAvatar(XFile file) async {
+    try {
+      const endpoint = '/auth/me/avatar/';
+      final request = http.MultipartRequest(
+        'PATCH',
+        Uri.parse('$baseUrl$endpoint'),
+      );
+      request.headers['Accept'] = 'application/json';
+      request.headers['Authorization'] = 'Bearer ${await _accessToken()}';
+      if (kIsWeb) {
+        final bytes = await file.readAsBytes();
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'avatar',
+            bytes,
+            filename: file.name,
+          ),
+        );
+      } else {
+        request.files.add(
+          await http.MultipartFile.fromPath('avatar', file.path),
+        );
+      }
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      final data = _decode(response, endpoint: endpoint);
+      final user = data['user'];
+      if (user is Map<String, dynamic>) {
+        return user['avatar']?.toString();
+      }
+      return data['avatar']?.toString();
+    } on ProfileApiException {
+      rethrow;
+    } catch (e) {
+      throw ProfileApiException(
+        'No se pudo subir la foto. ${_friendlyError(e)}',
+      );
+    }
+  }
+
+  /// Elimina el avatar del usuario autenticado.
+  Future<void> deleteAvatar() async {
+    try {
+      const endpoint = '/auth/me/avatar/';
+      final res = await http.delete(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: await _authHeaders(),
+      );
+      if (res.statusCode == 200 || res.statusCode == 204) {
+        return;
+      }
+      _decode(res, endpoint: endpoint);
+      throw ProfileApiException('Error eliminando avatar', statusCode: 500);
+    } on ProfileApiException {
+      rethrow;
+    } catch (e) {
+      throw ProfileApiException(
+        'No se pudo eliminar la foto. ${_friendlyError(e)}',
+      );
+    }
+  }
+
   /// Valida el cuerpo JSON y estandariza errores del backend.
   Map<String, dynamic> _decode(http.Response res, {required String endpoint}) {
     final contentType = (res.headers['content-type'] ?? '').toLowerCase();
@@ -248,5 +320,14 @@ class ProfileApi {
     const limit = 180;
     if (body.length <= limit) return body;
     return '${body.substring(0, limit)}...';
+  }
+
+  /// Limpia mensajes tecnicos antes de mostrarlos en la UI.
+  String _friendlyError(Object error) {
+    final text = error.toString().trim();
+    if (text.startsWith('Exception: ')) {
+      return text.substring('Exception: '.length);
+    }
+    return text;
   }
 }

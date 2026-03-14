@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 
 import '../services/api_config.dart';
 import '../services/catalog_api.dart';
+import '../services/cart_api.dart';
 import '../viewmodels/auth_viewmodel.dart';
+import '../viewmodels/cart_viewmodel.dart';
 import '../viewmodels/catalog_viewmodel.dart';
 import 'categories_view.dart';
 import 'offers_view.dart';
 import 'product_best_options_view.dart';
 import 'profile_view.dart';
 import 'scan_view.dart';
+import 'sensor_view.dart';
 import 'weather_view.dart';
 
 /// Home principal mostrado despues del login.
@@ -28,17 +31,21 @@ class HomeView extends StatefulWidget {
 class _HomeViewState extends State<HomeView> {
   int _selectedTab = 0;
   late final CatalogViewModel _catalogViewModel;
+  late final CartViewModel _cartViewModel;
 
   @override
   void initState() {
     super.initState();
     // El catalogo se comparte con vistas hijas para evitar recargas duplicadas.
     _catalogViewModel = CatalogViewModel(api: CatalogApi(ApiConfig.baseUrl));
+    _cartViewModel = CartViewModel(api: CartApi(ApiConfig.baseUrl));
     _catalogViewModel.loadInitialData();
+    _cartViewModel.loadCart();
   }
 
   @override
   void dispose() {
+    _cartViewModel.dispose();
     _catalogViewModel.dispose();
     super.dispose();
   }
@@ -46,7 +53,11 @@ class _HomeViewState extends State<HomeView> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([widget.viewModel, _catalogViewModel]),
+      animation: Listenable.merge([
+        widget.viewModel,
+        _catalogViewModel,
+        _cartViewModel,
+      ]),
       builder: (context, _) {
         final session = widget.viewModel.session;
         if (session == null) {
@@ -134,7 +145,12 @@ class _HomeViewState extends State<HomeView> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: RefreshIndicator(
-                  onRefresh: _catalogViewModel.refresh,
+                  onRefresh: () async {
+                    await Future.wait([
+                      _catalogViewModel.refresh(),
+                      _cartViewModel.refresh(),
+                    ]);
+                  },
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
@@ -145,7 +161,11 @@ class _HomeViewState extends State<HomeView> {
                           username: username,
                           location: location,
                           role: session.role,
+                          cartItems: _cartViewModel.totalItems,
+                          isCartLoading: _cartViewModel.isLoading,
+                          onCart: () => _openBestOptions(context),
                           onScan: () => _openScan(context),
+                          onSensors: () => _openSensors(context),
                           onLogout: () => _logout(context),
                         ),
                         const SizedBox(height: 14),
@@ -160,6 +180,13 @@ class _HomeViewState extends State<HomeView> {
                           bestPrice: _catalogViewModel.bestPrice(),
                           isLoadingCompare: _catalogViewModel.isLoadingCompare,
                           onCompare: _catalogViewModel.compareCurrent,
+                        ),
+                        const SizedBox(height: 12),
+                        _OrderShortcutCard(
+                          totalItems: _cartViewModel.totalItems,
+                          subtotal: _cartViewModel.subtotal,
+                          isLoading: _cartViewModel.isLoading,
+                          onTap: () => _openBestOptions(context),
                         ),
                         const SizedBox(height: 10),
                         const _DotsIndicator(),
@@ -350,8 +377,10 @@ class _HomeViewState extends State<HomeView> {
   void _openBestOptions(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ProductBestOptionsView(catalogViewModel: _catalogViewModel),
+        builder: (_) => ProductBestOptionsView(
+          catalogViewModel: _catalogViewModel,
+          cartViewModel: _cartViewModel,
+        ),
       ),
     );
   }
@@ -363,6 +392,7 @@ class _HomeViewState extends State<HomeView> {
         builder: (_) => ProductBestOptionDetailView(
           product: product,
           catalogViewModel: _catalogViewModel,
+          cartViewModel: _cartViewModel,
         ),
       ),
     );
@@ -393,7 +423,16 @@ class _HomeViewState extends State<HomeView> {
 
   /// Abre el modulo de escaneo.
   void _openScan(BuildContext context) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ScanView()));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ScanView()));
+  }
+
+  /// Abre la pantalla de sensores del dispositivo.
+  void _openSensors(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SensorView()));
   }
 
   /// Abre la pantalla de perfil.
@@ -438,14 +477,22 @@ class _Header extends StatelessWidget {
     required this.username,
     required this.location,
     required this.role,
+    required this.cartItems,
+    required this.isCartLoading,
+    required this.onCart,
     required this.onScan,
+    required this.onSensors,
     required this.onLogout,
   });
 
   final String username;
   final String location;
   final String? role;
+  final int cartItems;
+  final bool isCartLoading;
+  final VoidCallback onCart;
   final VoidCallback onScan;
+  final VoidCallback onSensors;
   final VoidCallback onLogout;
 
   @override
@@ -498,10 +545,63 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              tooltip: 'Mi pedido',
+              onPressed: onCart,
+              icon: const Icon(Icons.shopping_cart_outlined),
+            ),
+            if (isCartLoading)
+              const Positioned(
+                right: 6,
+                top: 6,
+                child: SizedBox(
+                  width: 10,
+                  height: 10,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else if (cartItems > 0)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F5FA8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 18,
+                    minHeight: 18,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    cartItems > 99 ? '99+' : '$cartItems',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
         IconButton(
           tooltip: 'Escanear producto',
           onPressed: onScan,
           icon: const Icon(Icons.qr_code_scanner_rounded),
+        ),
+        IconButton(
+          tooltip: 'Sensores',
+          onPressed: onSensors,
+          icon: const Icon(Icons.sensors_rounded),
         ),
         IconButton(
           tooltip: 'Cerrar sesion',
@@ -679,6 +779,111 @@ class _WeeklyHeroCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Acceso directo al pedido actual usando el resumen del carrito.
+class _OrderShortcutCard extends StatelessWidget {
+  const _OrderShortcutCard({
+    required this.totalItems,
+    required this.subtotal,
+    required this.isLoading,
+    required this.onTap,
+  });
+
+  final int totalItems;
+  final num subtotal;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  String _formatCurrency() {
+    if (subtotal == subtotal.roundToDouble()) {
+      return '\$${subtotal.toStringAsFixed(0)}';
+    }
+    return '\$${subtotal.toStringAsFixed(2)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFD6E2EA)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x12000000),
+              blurRadius: 12,
+              offset: Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF5FF),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.shopping_bag_outlined,
+                color: Color(0xFF2B6CB0),
+                size: 30,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Mi Pedido',
+                    style: TextStyle(
+                      color: Color(0xFF1A242D),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    isLoading
+                        ? 'Actualizando carrito...'
+                        : totalItems == 0
+                        ? 'Tu carrito esta vacio'
+                        : '$totalItems items · ${_formatCurrency()}',
+                    style: const TextStyle(
+                      color: Color(0xFF637381),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F5FA8),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'Ver',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

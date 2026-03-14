@@ -32,15 +32,25 @@ class JobsApi {
 
   String? get lastCacheStatus => _lastCacheStatus;
 
-  /// Solicita al backend la exportacion asincrona del catalogo a CSV.
-  Future<Map<String, dynamic>> enqueueExportProductsJob({
+  /// Solicita al backend la exportacion asincrona del catalogo.
+  Future<Map<String, dynamic>> createExportJob({
+    required String format,
     String? search,
+    int? categoryId,
   }) async {
     const endpoint = '/jobs/export-products/';
-    final payload = <String, dynamic>{};
+    final cleanFormat = format.trim().toLowerCase();
+    if (cleanFormat.isEmpty) {
+      throw JobsApiException('El formato de exportacion es obligatorio.');
+    }
+
+    final payload = <String, dynamic>{'format': cleanFormat};
     final query = search?.trim() ?? '';
     if (query.isNotEmpty) {
       payload['search'] = query;
+    }
+    if (categoryId != null) {
+      payload['category_id'] = categoryId;
     }
 
     final res = await http.post(
@@ -51,7 +61,7 @@ class JobsApi {
     final data = _decode(res, endpoint: endpoint);
     if (res.statusCode != 202) {
       throw JobsApiException(
-        'Estado inesperado al encolar job.',
+        'Estado inesperado al crear job de exportacion.',
         statusCode: res.statusCode,
       );
     }
@@ -122,11 +132,38 @@ class JobsApi {
 
   /// Extrae el mensaje mas representativo de una respuesta de error.
   String _extractMessage(Map<String, dynamic> data) {
-    if (data['detail'] != null) return data['detail'].toString();
-    if (data['message'] != null) return data['message'].toString();
-    if (data['error'] != null) return data['error'].toString();
-    if (data.isNotEmpty) return data.toString();
+    if (data['detail'] != null) {
+      return _toHumanMessage(data['detail'].toString());
+    }
+    if (data['message'] != null) {
+      return _toHumanMessage(data['message'].toString());
+    }
+    if (data['error'] != null) {
+      return _toHumanMessage(data['error'].toString());
+    }
+    if (data.isNotEmpty) {
+      return _toHumanMessage(data.toString());
+    }
     return '';
+  }
+
+  /// Traduce errores tecnicos frecuentes del backend a mensajes para usuario.
+  String _toHumanMessage(String raw) {
+    final text = raw.trim();
+    final normalized = text.toLowerCase();
+
+    if (normalized.contains('token not valid') ||
+        normalized.contains('given token not valid') ||
+        normalized.contains('token is invalid') ||
+        normalized.contains('invalid token')) {
+      return 'Tu sesion expiro o el token ya no es valido. Inicia sesion otra vez.';
+    }
+
+    if (normalized.contains('token') && normalized.contains('expired')) {
+      return 'Tu sesion expiro. Inicia sesion otra vez.';
+    }
+
+    return text;
   }
 
   /// Acorta bodies extensos para errores mas legibles.

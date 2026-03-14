@@ -16,13 +16,13 @@ El proyecto esta orientado a compras inteligentes. La app consume una API REST p
 
 - Onboarding inicial.
 - Registro, login, verificacion debug y cierre de sesion.
-- Carga de perfil y preferencias de notificaciones.
+- Carga de perfil, avatar y preferencias de notificaciones.
 - Catalogo de categorias y productos.
 - Comparador de precios por producto.
 - Listado paginado de ofertas con filtros.
 - Consulta de clima por ciudad, provincia y canton.
-- Escaneo de barcode o QR con soporte para crear productos si no existen.
-- Encolado y seguimiento de jobs para exportar productos.
+- Escaneo de barcode o QR con soporte para crear productos si no existen y mostrar precios por tienda.
+- Encolado y seguimiento de jobs para exportar productos en `txt`, `csv` o `pdf`.
 
 ## Estructura principal
 
@@ -49,6 +49,8 @@ Dependencias relevantes:
 - `google_fonts`
 - `flutter_secure_storage`
 - `mobile_scanner`
+- `image_picker`
+- `url_launcher`
 
 ## Configuracion de API
 
@@ -60,6 +62,12 @@ Valores comunes:
 - Android emulator: `http://10.0.2.2:8000/api`
 - Desktop local: `http://127.0.0.1:8000/api`
 - Dispositivo fisico: `http://<tu-ip-local>:8000/api`
+
+Notas importantes:
+
+- En web la app intenta reutilizar el host actual cuando no defines `API_BASE_URL`.
+- En iPhone o dispositivo fisico no uses `localhost` para llegar al backend de tu PC.
+- Para archivos exportados y avatars, el frontend normaliza URLs del backend cuando vienen con `localhost`, `127.0.0.1` o `10.0.2.2`.
 
 Ejemplo:
 
@@ -125,6 +133,13 @@ El backend debe responder JSON y exponer, como minimo, estos grupos de endpoints
 - `/jobs/...`
 - `/raffles/active/`
 
+Para las funciones nuevas, ademas debe soportar:
+
+- `PATCH /auth/me/avatar/`
+- `DELETE /auth/me/avatar/`
+- `POST /jobs/export-products/`
+- `GET /jobs/<job_id>/`
+
 Tambien debe:
 
 - Permitir CORS en desarrollo web.
@@ -138,6 +153,26 @@ Tambien debe:
 3. Desde `Home` navega a categorias, comparador, ofertas, clima, escaneo y perfil.
 4. Los `viewmodels` coordinan la UI y los `services`.
 5. Los `services` consumen la API y traducen errores a mensajes manejables.
+
+## Notas de modulos recientes
+
+### Perfil y avatar
+
+- La vista de perfil permite cambiar avatar desde galeria.
+- En web se usa `MultipartFile.fromBytes`; en movil `MultipartFile.fromPath`.
+- Si el backend devuelve la misma URL del avatar, la UI invalida cache local agregando una revision.
+
+### Escaneo
+
+- La pantalla de escaneo muestra `best_price`, `stores_available` y la lista `prices` cuando el backend la devuelve.
+- Cada fila de precio intenta renderizar tienda, fecha de actualizacion y precio.
+
+### Exportaciones
+
+- La pantalla de exportacion envia `format`, `search` y `category_id` opcional al backend.
+- Hace polling automatico del `job_id` hasta que el job termina.
+- Cuando llega `result_url`, la app permite abrir el archivo generado.
+- Si el login devuelve tokens en `tokens.access` / `tokens.refresh` o en `access` / `refresh`, el frontend acepta ambas formas.
 
 ## Notas para desarrollo
 

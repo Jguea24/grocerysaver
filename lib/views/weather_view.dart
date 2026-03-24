@@ -1,10 +1,9 @@
-// Pantalla de clima con seleccion geografica para Ecuador.
+// Pantalla de clima con consulta manual por ciudad.
 import 'package:flutter/material.dart';
 
-import '../services/ecuador_geo_api.dart';
 import '../services/weather_api.dart';
 
-/// Permite consultar clima por ciudad o seleccionando provincia y canton.
+/// Permite consultar clima ingresando una ciudad.
 class WeatherView extends StatefulWidget {
   const WeatherView({super.key, this.initialCity});
 
@@ -16,31 +15,21 @@ class WeatherView extends StatefulWidget {
 
 class _WeatherViewState extends State<WeatherView> {
   late final WeatherApi _api;
-  late final EcuadorGeoApi _geoApi;
   late final TextEditingController _cityController;
 
   bool _isLoading = false;
-  bool _isGeoLoading = false;
   String? _errorMessage;
-  String? _geoErrorMessage;
   String? _weatherCacheStatus;
-  String? _geoCacheStatus;
   WeatherSnapshot? _snapshot;
-  List<Map<String, dynamic>> _provinces = const [];
-  List<Map<String, dynamic>> _cantons = const [];
-  int? _selectedProvinceId;
-  int? _selectedCantonId;
 
   @override
   void initState() {
     super.initState();
     _api = WeatherApi();
-    _geoApi = EcuadorGeoApi();
     // La ciudad inicial se normaliza porque a veces llega como direccion larga.
     _cityController = TextEditingController(
       text: _normalizeCity(widget.initialCity),
     );
-    _loadProvinces();
     _loadWeather();
   }
 
@@ -86,97 +75,10 @@ class _WeatherViewState extends State<WeatherView> {
     }
   }
 
-  /// Carga las provincias disponibles para el selector geografico.
-  Future<void> _loadProvinces() async {
-    setState(() {
-      _isGeoLoading = true;
-      _geoErrorMessage = null;
-    });
-
-    try {
-      final provinces = await _geoApi.getProvinces();
-      if (!mounted) return;
-      setState(() {
-        _provinces = provinces;
-        _geoCacheStatus = _geoApi.lastCacheStatus;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _geoErrorMessage = e.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isGeoLoading = false;
-        });
-      }
-    }
-  }
-
-  /// Cambia de provincia y vuelve a poblar la lista de cantones.
-  Future<void> _onProvinceChanged(int? id) async {
-    if (id == null) return;
-
-    setState(() {
-      _selectedProvinceId = id;
-      _selectedCantonId = null;
-      _cantons = const [];
-      _isGeoLoading = true;
-      _geoErrorMessage = null;
-    });
-
-    try {
-      final cantons = await _geoApi.getCantonsByProvinceId(id);
-      if (!mounted) return;
-      setState(() {
-        _cantons = cantons;
-        _geoCacheStatus = _geoApi.lastCacheStatus;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _geoErrorMessage = e.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isGeoLoading = false;
-        });
-      }
-    }
-  }
-
-  /// Cambia de canton, sincroniza el texto de ciudad y recarga clima.
-  Future<void> _onCantonChanged(int? id) async {
-    if (id == null) return;
-
-    final selectedCanton = _cantons.cast<Map<String, dynamic>?>().firstWhere(
-      (c) => _itemId(c) == id,
-      orElse: () => null,
-    );
-
-    setState(() {
-      _selectedCantonId = id;
-      if (selectedCanton != null) {
-        _cityController.text = _itemName(selectedCanton);
-      }
-    });
-
+  /// Ejecuta una nueva busqueda y oculta el teclado antes de consultar.
+  Future<void> _submitWeatherSearch() async {
+    FocusScope.of(context).unfocus();
     await _loadWeather();
-  }
-
-  /// Convierte el id de una provincia o canton a entero.
-  int? _itemId(Map<String, dynamic>? item) {
-    final value = item?['id'];
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse((value ?? '').toString());
-  }
-
-  /// Devuelve el nombre visible de una provincia o canton.
-  String _itemName(Map<String, dynamic>? item) {
-    return (item?['name'] ?? '').toString().trim();
   }
 
   @override
@@ -186,35 +88,21 @@ class _WeatherViewState extends State<WeatherView> {
       appBar: AppBar(title: const Text('Clima')),
       body: RefreshIndicator(
         onRefresh: () async {
-          await _loadProvinces();
           await _loadWeather();
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
           children: [
-            _GeoSelectorCard(
-              provinces: _provinces,
-              cantons: _cantons,
-              selectedProvinceId: _selectedProvinceId,
-              selectedCantonId: _selectedCantonId,
-              isLoading: _isGeoLoading,
-              onProvinceChanged: (value) {
-                _onProvinceChanged(value);
-              },
-              onCantonChanged: (value) {
-                _onCantonChanged(value);
-              },
+            _CitySearchCard(
+              controller: _cityController,
+              isLoading: _isLoading,
+              onSearch: _submitWeatherSearch,
             ),
-            if (_weatherCacheStatus != null || _geoCacheStatus != null) ...[
+            if (_weatherCacheStatus != null) ...[
               const SizedBox(height: 10),
               _CacheStatusCard(
-                weatherCacheStatus: _weatherCacheStatus,
-                geoCacheStatus: _geoCacheStatus,
+                weatherCacheStatus: _weatherCacheStatus!,
               ),
-            ],
-            if (_geoErrorMessage != null) ...[
-              const SizedBox(height: 12),
-              _ErrorBanner(message: _geoErrorMessage!),
             ],
             if (_errorMessage != null) ...[
               const SizedBox(height: 12),
@@ -245,15 +133,74 @@ class _WeatherViewState extends State<WeatherView> {
   }
 }
 
-/// Tarjeta que resume el estado de cache de clima y geo.
+/// Tarjeta para ingresar manualmente la ciudad a consultar.
+class _CitySearchCard extends StatelessWidget {
+  const _CitySearchCard({
+    required this.controller,
+    required this.isLoading,
+    required this.onSearch,
+  });
+
+  final TextEditingController controller;
+  final bool isLoading;
+  final Future<void> Function() onSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFDDE3E8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Buscar clima por ciudad',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1A242D),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: controller,
+            enabled: !isLoading,
+            textInputAction: TextInputAction.search,
+            onFieldSubmitted: (_) {
+              onSearch();
+            },
+            decoration: const InputDecoration(
+              hintText: 'Ejemplo: Quito',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: isLoading ? null : onSearch,
+              icon: const Icon(Icons.search_rounded),
+              label: Text(isLoading ? 'Consultando...' : 'Consultar clima'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tarjeta que resume el estado de cache del modulo de clima.
 class _CacheStatusCard extends StatelessWidget {
   const _CacheStatusCard({
     required this.weatherCacheStatus,
-    required this.geoCacheStatus,
   });
 
-  final String? weatherCacheStatus;
-  final String? geoCacheStatus;
+  final String weatherCacheStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -261,16 +208,10 @@ class _CacheStatusCard extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        if (weatherCacheStatus != null)
-          _CacheChip(
-            label: 'Clima',
-            value: weatherCacheStatus!,
-          ),
-        if (geoCacheStatus != null)
-          _CacheChip(
-            label: 'Geo',
-            value: geoCacheStatus!,
-          ),
+        _CacheChip(
+          label: 'Clima',
+          value: weatherCacheStatus,
+        ),
       ],
     );
   }
@@ -299,124 +240,6 @@ class _CacheChip extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-/// Selector encadenado de provincia y canton.
-class _GeoSelectorCard extends StatelessWidget {
-  const _GeoSelectorCard({
-    required this.provinces,
-    required this.cantons,
-    required this.selectedProvinceId,
-    required this.selectedCantonId,
-    required this.isLoading,
-    required this.onProvinceChanged,
-    required this.onCantonChanged,
-  });
-
-  final List<Map<String, dynamic>> provinces;
-  final List<Map<String, dynamic>> cantons;
-  final int? selectedProvinceId;
-  final int? selectedCantonId;
-  final bool isLoading;
-  final ValueChanged<int?> onProvinceChanged;
-  final ValueChanged<int?> onCantonChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    // Se filtran ids invalidos para que el dropdown no rompa por valores huerfanos.
-    final provinceItems = provinces
-        .map((p) {
-          final id = _itemId(p);
-          if (id == null) return null;
-          final name = (p['name'] ?? '').toString();
-          return DropdownMenuItem<int>(value: id, child: Text(name));
-        })
-        .whereType<DropdownMenuItem<int>>()
-        .toList();
-
-    final cantonItems = cantons
-        .map((c) {
-          final id = _itemId(c);
-          if (id == null) return null;
-          final name = (c['name'] ?? '').toString();
-          return DropdownMenuItem<int>(value: id, child: Text(name));
-        })
-        .whereType<DropdownMenuItem<int>>()
-        .toList();
-
-    final validProvinceValue =
-        provinceItems.any((item) => item.value == selectedProvinceId)
-        ? selectedProvinceId
-        : null;
-    final validCantonValue =
-        cantonItems.any((item) => item.value == selectedCantonId)
-        ? selectedCantonId
-        : null;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFDDE3E8)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Ubicacion por provincia y canton',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF1A242D),
-            ),
-          ),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<int>(
-            key: ValueKey(
-              'province-${validProvinceValue ?? 0}-${provinceItems.length}',
-            ),
-            initialValue: validProvinceValue,
-            hint: const Text('Provincia'),
-            items: provinceItems,
-            onChanged: isLoading ? null : onProvinceChanged,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-          ),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<int>(
-            key: ValueKey(
-              'canton-${validCantonValue ?? 0}-${selectedProvinceId ?? 0}-${cantonItems.length}',
-            ),
-            initialValue: validCantonValue,
-            hint: const Text('Canton'),
-            items: cantonItems,
-            onChanged: isLoading || selectedProvinceId == null
-                ? null
-                : onCantonChanged,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-          ),
-          if (isLoading) ...[
-            const SizedBox(height: 10),
-            const LinearProgressIndicator(minHeight: 3),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// Convierte el id crudo de los items del selector.
-  int? _itemId(Map<String, dynamic> item) {
-    final raw = item['id'];
-    if (raw is int) return raw;
-    if (raw is num) return raw.toInt();
-    return int.tryParse((raw ?? '').toString());
   }
 }
 
@@ -644,7 +467,7 @@ class _MetricChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.16),
+          color: Colors.white.withOpacity(0.16),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
@@ -695,3 +518,4 @@ class _ErrorBanner extends StatelessWidget {
     );
   }
 }
+

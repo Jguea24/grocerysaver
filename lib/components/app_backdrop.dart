@@ -31,7 +31,7 @@ class AppBackdrop extends StatelessWidget {
             right: -35,
             child: _bubble(
               size: 180,
-              color: const Color(0xFF8ED9A9).withValues(alpha: 0.25),
+              color: const Color(0xFF8ED9A9).withOpacity(0.25),
             ),
           ),
           Positioned(
@@ -39,7 +39,7 @@ class AppBackdrop extends StatelessWidget {
             bottom: 60,
             child: _bubble(
               size: 140,
-              color: const Color(0xFF3E8E62).withValues(alpha: 0.12),
+              color: const Color(0xFF3E8E62).withOpacity(0.12),
             ),
           ),
           SafeArea(
@@ -67,3 +67,4 @@ class AppBackdrop extends StatelessWidget {
     );
   }
 }
+

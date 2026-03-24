@@ -20,7 +20,7 @@ El proyecto esta orientado a compras inteligentes. La app consume una API REST p
 - Catalogo de categorias y productos.
 - Comparador de precios por producto.
 - Listado paginado de ofertas con filtros.
-- Consulta de clima por ciudad, provincia y canton.
+- Consulta de clima por ciudad.
 - Escaneo de barcode o QR con soporte para crear productos si no existen y mostrar precios por tienda.
 - Encolado y seguimiento de jobs para exportar productos en `txt`, `csv` o `pdf`.
 
@@ -126,8 +126,6 @@ El backend debe responder JSON y exponer, como minimo, estos grupos de endpoints
 - `/compare-prices/`
 - `/offers/`
 - `/weather/`
-- `/geo/ecuador/provinces/`
-- `/geo/ecuador/cantons/`
 - `/products/scan/`
 - `/profile/...`
 - `/jobs/...`

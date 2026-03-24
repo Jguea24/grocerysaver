@@ -36,7 +36,9 @@ class ProfileApi {
 
   /// Lee el token JWT guardado para consumir endpoints privados.
   Future<String> _accessToken() async {
-    final token = await _storage.read(key: 'access');
+    final token =
+        await _storage.read(key: 'access_token') ??
+        await _storage.read(key: 'access');
     if (token == null || token.isEmpty) {
       throw ProfileApiException('No access token');
     }

@@ -1226,7 +1226,7 @@ class _TrackCard extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.8),
+              color: Colors.white.withOpacity(0.8),
               borderRadius: BorderRadius.circular(10),
             ),
             alignment: Alignment.center,
@@ -1275,3 +1275,4 @@ class _TrackCard extends StatelessWidget {
     );
   }
 }
+

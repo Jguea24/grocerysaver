@@ -76,48 +76,46 @@ Se usa `Provider` principalmente en la capa nueva `app/data/domain/presentation`
 - `google_sign_in`
 - `google_sign_in_web`
 
-## 3. Arquitectura usada
+## 3. Arquitectura usada (MVVM)
 
-El proyecto hoy convive con dos estilos de organizacion:
+El proyecto se esta trabajando bajo **MVVM**, con una transicion gradual desde codigo previo. La organizacion actual se puede leer asi:
 
-### A. Estructura por capas nueva
+### A. Model
 
-Ubicada principalmente en:
+Responsable de entidades, contratos y acceso a datos.
 
-- `lib/app`
-- `lib/data`
-- `lib/domain`
-- `lib/presentation`
+- `lib/domain` (entidades y contratos)
+- `lib/data` (repositorios concretos y cliente API principal)
+- `lib/models` (modelos usados por modulos existentes)
+- `lib/services` (servicios HTTP de modulos clasicos)
+- `lib/core` (servicios transversales)
 
-Esta parte sigue una separacion por responsabilidades:
+### B. ViewModel
 
-- `app`: configuracion global, rutas y tema
-- `data`: clientes API y repositorios concretos
-- `domain`: entidades y contratos de repositorio
-- `presentation`: providers y pantallas principales
+Orquesta el estado, la logica de presentacion y las llamadas al Model.
 
-### B. Estructura modular clasica
+- `lib/presentation/providers` (estado del flujo principal)
+- `lib/viewmodels` (estado de vistas modulares)
 
-Ubicada principalmente en:
+### C. View
 
-- `lib/services`
-- `lib/models`
-- `lib/viewmodels`
-- `lib/views`
-- `lib/components`
+Contiene pantallas, widgets y rutas.
 
-Esta parte se usa para modulos mas recientes o pantallas separadas, por ejemplo:
+- `lib/presentation/screens` (pantallas principales nuevas)
+- `lib/views` (pantallas modulares)
+- `lib/components` (widgets reutilizables)
+- `lib/app` (rutas y configuracion general)
 
-- carrito nuevo
-- checkout
-- pago
-- tracking
-- inventario modular
-- perfil
+### Flujo MVVM esperado
 
-### Conclusión
+1. La **View** dispara acciones del usuario.
+2. El **ViewModel** consulta/actualiza el **Model**.
+3. El **Model** consume API y devuelve datos.
+4. El **ViewModel** emite estado para actualizar la **View**.
 
-La app es actualmente un proyecto hibrido. No todo esta unificado en una sola arquitectura todavia, pero ya existe una base limpia y funcional sobre la cual seguir consolidando.
+### Nota de consolidacion
+
+Hoy la app es hibrida, pero la direccion es **unificar todo en MVVM**. Las carpetas clasicas siguen existiendo mientras se migran pantallas y servicios.
 
 ## 4. Estructura de carpetas
 
@@ -464,4 +462,3 @@ Este proyecto fue evolucionando sobre una base Flutter existente y fue ampliado 
 - comparacion de precios
 - control de inventario del hogar
 - flujo completo de carrito a pago
-
